@@ -31,6 +31,8 @@ services:
       - "8080:8080"
     shm_size: 1gb
     init: true
+    security_opt:
+      - seccomp=./seccomp_profile.json
     restart: unless-stopped
 
 volumes:
