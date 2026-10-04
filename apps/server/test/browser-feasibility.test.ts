@@ -25,7 +25,10 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
 
-const sandboxRuntimeIt = typeof process.getuid === 'function' && process.getuid() === 0 ? it.skip : it;
+const skipSandboxRuntimeTests =
+  process.env.SKIP_SANDBOX_RUNTIME_TESTS === '1' ||
+  (typeof process.getuid === 'function' && process.getuid() === 0);
+const sandboxRuntimeIt = skipSandboxRuntimeTests ? it.skip : it;
 
 describe('Chromium feasibility', () => {
   it('finds a Chromium executable', async () => {
