@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: browser_screenshot
+      POSTGRES_USER: browser_screenshot
+      POSTGRES_PASSWORD: browser_screenshot
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U browser_screenshot -d browser_screenshot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - browser-screenshot-postgres:/var/lib/postgresql/data
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      HOST: 0.0.0.0
+      PUBLIC_BASE_URL: http://localhost:8080
+      DATABASE_URL: postgresql://browser_screenshot:browser_screenshot@postgres:5432/browser_screenshot
+      GITHUB_CLIENT_ID: local-dev-placeholder
+      GITHUB_CLIENT_SECRET: local-dev-placeholder
+      SESSION_SECRET: local-dev-session-secret-32-characters-minimum
+      MCP_TOKEN_SECRET: local-dev-mcp-token-secret-32-characters-minimum
+    ports:
+      - "8080:8080"
+    shm_size: 1gb
+    init: true
+    restart: unless-stopped
+
+volumes:
+  browser-screenshot-postgres:

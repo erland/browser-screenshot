@@ -1,0 +1,21 @@
+schema_version: 1
+project:
+  name: browser-screenshot
+  type: web-service
+  description: Authenticated standalone Playwright/Chromium screenshot service with web UI, REST API and remote MCP.
+source:
+  mode: zip
+  repository: https://github.com/erland/browser-screenshot
+  default_branch: main
+complexity: medium
+stack:
+  languages:
+    - TypeScript
+  frontend: React + Vite
+  backend: Fastify + Node.js 22
+  database: PostgreSQL
+  browser: Playwright + Chromium
+delivery:
+  packaging: Docker/OCI image
+  target: Coolify
+  registry: GHCR

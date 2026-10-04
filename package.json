@@ -1,0 +1,34 @@
+{
+  "name": "browser-screenshot",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "workspaces": [
+    "apps/server",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @browser-screenshot/server",
+    "dev:server": "npm run dev -w @browser-screenshot/server",
+    "dev:web": "npm run dev -w @browser-screenshot/web",
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck -w @browser-screenshot/server && npm run typecheck -w @browser-screenshot/web",
+    "test": "npm run lint && npm run typecheck && npm run test:unit",
+    "build": "npm run build -w @browser-screenshot/web && npm run build -w @browser-screenshot/server",
+    "verify": "npm test && npm run build",
+    "start": "npm run start -w @browser-screenshot/server",
+    "test:unit": "npm run test -w @browser-screenshot/server && npm run test -w @browser-screenshot/web",
+    "acceptance:remote": "./scripts/verify-acceptance.sh",
+    "release:gate": "./scripts/release-gate.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0",
+    "globals": "^16.4.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.45.0"
+  },
+  "type": "module"
+}

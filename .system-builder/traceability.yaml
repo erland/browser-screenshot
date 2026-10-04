@@ -1,0 +1,439 @@
+schema_version: 1
+requirements:
+  FR-001:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-006
+    - DEV-008
+    acceptance_criteria: []
+  FR-002:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-006
+    - DEV-008
+    acceptance_criteria:
+    - AC-005
+  FR-003:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-004
+    acceptance_criteria:
+    - AC-001
+  FR-004:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-004
+    - DEV-007
+    acceptance_criteria:
+    - AC-002
+  FR-005:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-004
+    - DEV-007
+    acceptance_criteria:
+    - AC-003
+  FR-006:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-002
+    - DEV-004
+    acceptance_criteria: []
+  FR-007:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-004
+    acceptance_criteria:
+    - AC-001
+  FR-008:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-004
+    - DEV-007
+    acceptance_criteria:
+    - AC-004
+  FR-009:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-004
+    acceptance_criteria: []
+  FR-010:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-008
+    acceptance_criteria:
+    - AC-009
+  FR-011:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-007
+    acceptance_criteria:
+    - AC-008
+  FR-012:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-001
+    - DEV-011
+    acceptance_criteria:
+    - AC-010
+  FR-013:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-004
+    acceptance_criteria: []
+  FR-014:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-004
+    acceptance_criteria: []
+  FR-015:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-003
+    acceptance_criteria:
+    - AC-006
+  FR-016:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-003
+    - DEV-010
+    acceptance_criteria:
+    - AC-006
+  FR-017:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-004
+    - DEV-009
+    acceptance_criteria:
+    - AC-007
+  FR-018:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-008
+    acceptance_criteria: []
+  NFR-001:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-003
+    - DEV-010
+    acceptance_criteria:
+    - AC-006
+  NFR-002:
+    priority: must
+    status: implemented-with-deferred-deployment-verification
+    development_steps:
+    - DEV-010
+    - DEV-011
+    acceptance_criteria: []
+  NFR-003:
+    priority: should
+    status: implemented
+    development_steps:
+    - DEV-009
+    acceptance_criteria: []
+  NFR-004:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-004
+    - DEV-009
+    acceptance_criteria:
+    - AC-007
+  NFR-005:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-001
+    - DEV-011
+    - DEV-014
+    acceptance_criteria:
+    - AC-010
+  NFR-006:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-011
+    acceptance_criteria: []
+  NFR-007:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-007
+    acceptance_criteria:
+    - AC-008
+  NFR-008:
+    priority: must
+    status: implemented
+    development_steps:
+    - DEV-001
+    - DEV-012
+    - DEV-013
+    acceptance_criteria: []
+acceptance_criteria:
+  AC-001:
+    requirement: FR-003
+    status: passed
+    verification:
+    - TEST-004
+  AC-002:
+    requirement: FR-004
+    status: passed
+    verification:
+    - TEST-004
+  AC-003:
+    requirement: FR-005
+    status: passed
+    verification:
+    - TEST-004
+  AC-004:
+    requirement: FR-008
+    status: passed
+    verification:
+    - TEST-004
+  AC-005:
+    requirement: FR-002
+    status: passed
+    verification:
+    - TEST-006
+  AC-006:
+    requirement: FR-016
+    status: passed
+    verification:
+    - TEST-003
+  AC-007:
+    requirement: FR-017
+    status: passed
+    verification:
+    - TEST-004
+    - TEST-009
+  AC-008:
+    requirement: FR-011
+    status: passed
+    verification:
+    - TEST-007
+  AC-009:
+    requirement: FR-010
+    status: passed
+    verification:
+    - TEST-008
+  AC-010:
+    requirement: FR-012
+    status: deferred
+    verification:
+    - TEST-011
+development_steps:
+  DEV-001:
+    status: completed
+    requirements:
+    - FR-012
+    - NFR-005
+    - NFR-008
+  DEV-002:
+    status: completed
+    requirements:
+    - FR-006
+  DEV-003:
+    status: completed
+    requirements:
+    - FR-015
+    - FR-016
+    - NFR-001
+  DEV-004:
+    status: completed
+    requirements:
+    - FR-003
+    - FR-004
+    - FR-005
+    - FR-006
+    - FR-007
+    - FR-008
+    - FR-009
+    - FR-013
+    - FR-014
+    - FR-017
+    - NFR-004
+  DEV-005:
+    status: completed
+    requirements: []
+  DEV-006:
+    status: completed
+    requirements:
+    - FR-001
+    - FR-002
+  DEV-007:
+    status: completed
+    requirements:
+    - FR-004
+    - FR-005
+    - FR-008
+    - FR-011
+    - NFR-007
+  DEV-008:
+    status: completed
+    requirements:
+    - FR-001
+    - FR-002
+    - FR-010
+    - FR-018
+  DEV-009:
+    status: completed
+    requirements:
+    - FR-017
+    - NFR-003
+    - NFR-004
+  DEV-010:
+    status: completed
+    requirements:
+    - FR-016
+    - NFR-001
+    - NFR-002
+  DEV-011:
+    status: completed-with-deferred-verification
+    requirements:
+    - FR-012
+    - NFR-002
+    - NFR-005
+    - NFR-006
+  DEV-012:
+    status: completed-with-deferred-verification
+    requirements:
+    - NFR-008
+  DEV-013:
+    status: completed-with-deferred-verification
+    requirements:
+    - NFR-008
+  DEV-014:
+    status: completed-with-deferred-verification
+    requirements:
+    - NFR-005
+verification:
+  TEST-003:
+    type: security
+    status: passed
+    requirements:
+    - FR-015
+    - FR-016
+    - NFR-001
+    acceptance_criteria:
+    - AC-006
+  TEST-004:
+    type: integration
+    status: passed
+    requirements:
+    - FR-003
+    - FR-004
+    - FR-005
+    - FR-008
+    - FR-017
+    acceptance_criteria:
+    - AC-001
+    - AC-002
+    - AC-003
+    - AC-004
+    - AC-007
+  TEST-006:
+    type: integration
+    status: passed
+    requirements:
+    - FR-001
+    - FR-002
+    acceptance_criteria:
+    - AC-005
+  TEST-007:
+    type: e2e
+    status: passed
+    requirements:
+    - FR-011
+    - NFR-007
+    acceptance_criteria:
+    - AC-008
+  TEST-008:
+    type: integration
+    status: passed
+    requirements:
+    - FR-010
+    acceptance_criteria:
+    - AC-009
+  TEST-009:
+    type: other
+    status: passed
+    requirements:
+    - FR-017
+    - NFR-003
+    - NFR-004
+    acceptance_criteria:
+    - AC-007
+  TEST-010:
+    type: security
+    status: passed
+    requirements:
+    - FR-016
+    - NFR-001
+    - NFR-002
+    acceptance_criteria:
+    - AC-006
+  TEST-011:
+    type: integration
+    status: blocked
+    requirements:
+    - FR-012
+    - NFR-005
+    acceptance_criteria:
+    - AC-010
+  TEST-013:
+    type: e2e
+    status: deferred
+    requirements:
+    - FR-002
+    - FR-003
+    - FR-004
+    - FR-005
+    - FR-008
+    - FR-010
+    - FR-011
+    - FR-012
+    - FR-016
+    - FR-017
+    - NFR-001
+    - NFR-007
+    - NFR-008
+    acceptance_criteria:
+    - AC-001
+    - AC-002
+    - AC-003
+    - AC-004
+    - AC-005
+    - AC-006
+    - AC-007
+    - AC-008
+    - AC-009
+    - AC-010
+
+# DEV-013 acceptance implementation evidence: scripts/verify-acceptance.sh,
+# scripts/acceptance-mcp.mjs and docs/acceptance-test-plan.md. The harness requires
+# real REST session + MCP bearer credentials and verifies REST/MCP/security parity;
+# representative runtime execution and UI checklist are deferred by explicit user instruction.
+
+# DEV-014 release-readiness implementation evidence: docs/operations-runbook.md,
+# docs/release-checklist.md and scripts/release-gate.sh. The gate is intentionally
+# fail-closed and cannot return GO until deferred source/container/CI/GHCR/E2E/UI/
+# production-egress/backup evidence has been collected.

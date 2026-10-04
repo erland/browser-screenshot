@@ -1,0 +1,53 @@
+schema_version: 1
+profile_name: coolify-external-postgresql
+packaging:
+  type: oci
+  image_registry: ghcr
+  image_name: ghcr.io/erland/browser-screenshot
+  multi_stage_build: true
+  run_as_non_root: true
+target:
+  platform: coolify
+  environment: production
+runtime:
+  stateless: true
+  replicas: 1
+  port: 8080
+  startup_command: null
+database:
+  type: postgresql
+  deployment: external
+  migrations: application_startup
+  connection_via_environment: true
+persistence:
+  application_files: ephemeral
+  volumes: []
+network:
+  reverse_proxy: platform
+  tls: platform
+  public_exposure: true
+  base_path: /
+  private_egress_block_required: true
+  private_egress_block_layer: host_or_platform
+health:
+  enabled: true
+  liveness_endpoint: /health
+  readiness_endpoint: /ready
+  startup_endpoint: /ready
+configuration:
+  environment_variables:
+    - PORT
+    - HOST
+    - PUBLIC_BASE_URL
+    - DATABASE_URL
+    - GITHUB_CLIENT_ID
+    - GITHUB_CLIENT_SECRET
+    - SESSION_SECRET
+    - MCP_TOKEN_SECRET
+  secrets_via_environment: true
+  config_files: []
+delivery:
+  build_in_ci: true
+  publish_artifact: true
+  deployment_trigger: release
+notes: Browser traffic is filtered in-app, but release also requires host/platform egress filtering against private/internal networks. The application container must not receive privileged mode or NET_ADMIN solely to implement that rule.
