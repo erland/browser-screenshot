@@ -23,7 +23,11 @@ The OCI image exposes port `8080` and has a Docker liveness healthcheck against 
 
 ## Browser runtime
 
-The runtime is pinned to `mcr.microsoft.com/playwright:v1.55.0-noble`, matching the npm Playwright version. The service runs as the non-root `pwuser` and does not pass `--no-sandbox` to Chromium. Allocate approximately 1 GiB shared memory when the platform allows it; the local representative compose profile uses `shm_size: 1gb`.
+The runtime is pinned to `mcr.microsoft.com/playwright:v1.55.0-noble`, matching the npm Playwright version. The service runs as the non-root `pwuser` and requires Chromium sandboxing.
+
+The repository contains Playwright's seccomp profile in `seccomp_profile.json`. When the application is deployed through Docker Compose, the `app` service applies it with `security_opt`. If Coolify is configured to run the Dockerfile directly instead of the repository Compose file, configure the equivalent runtime security option so the container uses this seccomp profile. Do not replace this with `--no-sandbox`, privileged mode or `SYS_ADMIN` in production.
+
+Allocate approximately 1 GiB shared memory when the platform allows it; the representative compose profile uses `shm_size: 1gb`.
 
 ## Network security requirement
 
@@ -51,9 +55,7 @@ On a Docker-capable Linux host run:
 ./scripts/verify-container.sh
 ```
 
-The script builds the exact production Dockerfile, runs Chromium as the packaged non-root user without `--no-sandbox`, captures a public PNG, proves loopback navigation is blocked, starts the application with PostgreSQL, and waits for `/ready`.
-
-A PASS from this script is required evidence for DEV-011. The current ChatGPT/Agent Workspace environment does not provide Docker/Podman, so packaging may be implemented here but DEV-011 must remain awaiting verification until the script has passed on a Docker-capable host or CI runner.
+The script builds the exact production Dockerfile, launches the packaged non-root runtime with the repository seccomp profile, captures a public PNG, proves loopback navigation is blocked, starts the application with PostgreSQL, and waits for `/ready`.
 
 ## GHCR release delivery
 
