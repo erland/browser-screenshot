@@ -1,0 +1,109 @@
+import { describe, expect, it } from 'vitest';
+import type { ScreenshotBrowser } from '../src/browser.js';
+import { ScreenshotResourceController } from '../src/resource-controls.js';
+
+const request = { url: 'https://example.com', width: 800, height: 600, deviceScaleFactor: 1, fullPage: false, timeoutMs: 1000 };
+
+function fakeBrowser(onClose: () => void): ScreenshotBrowser {
+  return { browser: {} as ScreenshotBrowser['browser'], proxy: {} as ScreenshotBrowser['proxy'], close: async () => onClose() };
+}
+
+describe('resource controls', () => {
+  it('enforces a per-actor minute budget', async () => {
+    const controller = new ScreenshotResourceController(
+      { maxConcurrent: 1, rateLimitPerMinute: 1, maxJobsPerBrowser: 10 },
+      async () => fakeBrowser(() => undefined),
+      async () => ({ png: Buffer.from('png'), contextMarker: 'x', width: 800, height: 600 }),
+    );
+    await controller.run('user@example.com', request);
+    await expect(controller.run('user@example.com', request)).rejects.toMatchObject({ code: 'RATE_LIMITED', statusCode: 429 });
+    await controller.close();
+  });
+
+  it('never exceeds the global concurrency budget', async () => {
+    let active = 0;
+    let peak = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const controller = new ScreenshotResourceController(
+      { maxConcurrent: 2, rateLimitPerMinute: 10, maxJobsPerBrowser: 10 },
+      async () => fakeBrowser(() => undefined),
+      async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await gate;
+        active -= 1;
+        return { png: Buffer.from('png'), contextMarker: 'x', width: 800, height: 600 };
+      },
+    );
+    const jobs = ['a','b','c'].map((key) => controller.run(`${key}@example.com`, request));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(peak).toBe(2);
+    release();
+    await Promise.all(jobs);
+    await controller.close();
+  });
+
+
+
+  it('rejects work when the queue is full', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const controller = new ScreenshotResourceController(
+      { maxConcurrent: 1, rateLimitPerMinute: 10, maxJobsPerBrowser: 10, maxQueued: 1, queueTimeoutMs: 5000 },
+      async () => fakeBrowser(() => undefined),
+      async () => { await gate; return { png: Buffer.from('png'), contextMarker: 'x', width: 800, height: 600 }; },
+    );
+    const first = controller.run('a@example.com', request);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = controller.run('b@example.com', request);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await expect(controller.run('c@example.com', request)).rejects.toMatchObject({ code: 'CAPACITY_EXCEEDED', statusCode: 503 });
+    release();
+    await Promise.all([first, second]);
+    await controller.close();
+  });
+
+  it('times out queued work instead of waiting forever', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const controller = new ScreenshotResourceController(
+      { maxConcurrent: 1, rateLimitPerMinute: 10, maxJobsPerBrowser: 10, maxQueued: 1, queueTimeoutMs: 10 },
+      async () => fakeBrowser(() => undefined),
+      async () => { await gate; return { png: Buffer.from('png'), contextMarker: 'x', width: 800, height: 600 }; },
+    );
+    const first = controller.run('a@example.com', request);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await expect(controller.run('b@example.com', request)).rejects.toMatchObject({ code: 'CAPACITY_EXCEEDED', statusCode: 503 });
+    release();
+    await first;
+    await controller.close();
+  });
+
+  it('recycles the shared browser after the configured job budget', async () => {
+    let launches = 0;
+    let closes = 0;
+    const controller = new ScreenshotResourceController(
+      { maxConcurrent: 1, rateLimitPerMinute: 10, maxJobsPerBrowser: 2 },
+      async () => { launches += 1; return fakeBrowser(() => { closes += 1; }); },
+      async () => ({ png: Buffer.from('png'), contextMarker: 'x', width: 800, height: 600 }),
+    );
+    await controller.run('a@example.com', request);
+    await controller.run('b@example.com', request);
+    await controller.run('c@example.com', request);
+    expect(launches).toBe(2);
+    expect(closes).toBe(1);
+    await controller.close();
+    expect(closes).toBe(2);
+  });
+});
+
+it('maps browser safety-limit failures to a stable resource-limit error', async () => {
+  const controller = new ScreenshotResourceController(
+    { maxConcurrent: 1, rateLimitPerMinute: 10, maxJobsPerBrowser: 10 },
+    async () => fakeBrowser(() => undefined),
+    async () => { throw new Error('Screenshot safety limit: rendered page exceeds 50000000 pixels.'); },
+  );
+  await expect(controller.run('user@example.com', request)).rejects.toMatchObject({ code: 'RESOURCE_LIMIT', statusCode: 413 });
+  await controller.close();
+});

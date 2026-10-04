@@ -1,0 +1,77 @@
+schema_version: 1
+active_work:
+  mode: CREATE
+  plan: docs/development-plan.md
+  selected_step: DEV-013
+progress:
+  completed:
+  - DEV-001
+  - DEV-002
+  - DEV-003
+  - DEV-004
+  - DEV-005
+  - DEV-006
+  - DEV-007
+  - DEV-008
+  - DEV-009
+  - DEV-010
+  - DEV-011
+  - DEV-012
+  - DEV-013
+  in_progress: null
+  next:
+    recommended: null
+    reason: DEV-014 release-readiness and operations artifacts are implemented. No further development step remains; complete deferred container, CI/release and end-to-end evidence before production release.
+blockers:
+- id: DEV-011-CONTAINER-VERIFY
+  type: environment
+  status: deferred
+  detail: Current execution environments expose no Docker or Podman runtime, so required
+    production-image build/start/Chromium smoke verification cannot be executed here.
+  resolution: Run ./scripts/verify-container.sh on a Docker-capable Linux host or
+    CI runner.
+- id: DEV-012-ACTIONS-VERIFY
+  type: verification
+  status: deferred
+  detail: CI and release workflows are implemented and YAML-reviewed, but the user
+    explicitly requested that tests/execution be skipped for now.
+  resolution: Run the CI workflow on a PR/push and publish a semver GitHub Release
+    to confirm GHCR multi-arch publishing.
+- id: DEV-013-ACCEPTANCE-VERIFY
+  type: verification
+  status: deferred
+  detail: Remote REST/MCP/security acceptance and manual desktop/mobile UI acceptance
+    are implemented but intentionally not executed yet.
+  resolution: Run ./scripts/verify-acceptance.sh against a representative HTTPS deployment
+    and complete docs/acceptance-test-plan.md UI checklist.
+verification:
+  last_status: development-plan-implemented-release-verification-deferred
+  baseline: green
+  commands:
+  - npm ci --no-audit --no-fund
+  - npm test
+  - npm run build
+  notes: DEV-014 adds a fail-closed release gate, release checklist and operations runbook covering deployment, health/readiness, logs, backup/restore, rollback, secret rotation, troubleshooting and incident response. Runtime/container/CI/acceptance evidence remains deferred by explicit user instruction; release gate must remain NO-GO until that evidence exists.
+  verified_source: Current DEV-011 hardening revision verified in Agent Workspace
+    with npm ci, lint, typecheck, 67 backend tests passed / 2 root-only sandbox runtime
+    tests skipped, 4 frontend tests passed, and production build passed.
+  deferred:
+  - Run ./scripts/verify-container.sh to prove production image build/start/readiness,
+    Chromium sandbox and packaged browser security boundary.
+  - Verify host/platform private-egress filtering in target-like Coolify deployment.
+  - Run GitHub CI/release workflows and verify GHCR multi-arch publishing.
+  - Run ./scripts/verify-acceptance.sh with real REST/MCP credentials and complete
+    the manual desktop/mobile UI checklist.
+source_state:
+  drift: none
+  reference: planning-handoff
+execution:
+  next_action: verify-deferred-evidence
+  step: null
+  operation: release-readiness
+  reason: All planned development steps DEV-001 through DEV-014 are implemented; remaining work is deferred verification/evidence collection before release.
+completion:
+  allowed: false
+  waiting_for: deferred container, GitHub Actions/release, end-to-end acceptance and release-gate evidence
+  implementation_revision: dev014-release-readiness
+  evidence_status: development-complete-release-verification-deferred
