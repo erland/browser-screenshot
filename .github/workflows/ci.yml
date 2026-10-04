@@ -30,6 +30,11 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Canonical verification
+        env:
+          # GitHub-hosted Ubuntu 24.04 disables the user namespace mechanism
+          # Chromium needs for its sandbox. The packaged container is the
+          # authoritative sandbox runtime check in the next job.
+          SKIP_SANDBOX_RUNTIME_TESTS: "1"
         run: npm run verify
 
   container-smoke:
