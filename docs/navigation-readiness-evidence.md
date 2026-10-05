@@ -72,3 +72,17 @@ BROWSER_SCREENSHOT_NAVIGATION_EVIDENCE=0
 and restart/redeploy.
 
 The evidence mode is intended for bounded diagnostic windows, not permanent verbose logging.
+
+
+## Current decision
+
+The representative production-like VA-01 run is intentionally deferred.
+
+Until that evidence is collected:
+
+- keep `waitUntil: 'networkidle'` unchanged,
+- do not start IP-017,
+- treat DR-006 as deferred rather than verified,
+- retain the opt-in evidence instrumentation so validation can be resumed later without another implementation change.
+
+This is a deliberate no-change decision, not evidence that `networkidle` is optimal.
