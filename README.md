@@ -132,6 +132,10 @@ GitHub Actions runs the canonical source verification on pushes and pull request
 
 Publishing a GitHub Release with a semantic-version tag such as `v1.2.3` builds and pushes a multi-architecture image for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/<repository>`. The release produces deterministic tags for both the normalized version (`1.2.3`) and the Git tag (`v1.2.3`); stable releases also update `latest`. Pre-release versions such as `v1.2.3-rc.1` never update `latest`.
 
+### Candidate images and production approval
+
+Release semantics are defined in `docs/release-model.md`. A prerelease/RC image may be published and deployed to a representative environment to collect acceptance evidence. A stable release is considered production-approved only when the fail-closed release gate is `GO` for the exact commit/image. For stable releases, GitHub Actions downloads the attached release-evidence package, runs the fail-closed gate and promotes the exact approved candidate digest to the stable tags and `latest`. A GitHub Release whose promotion workflow fails is not production-approved.
+
 ## End-to-end acceptance
 
 DEV-013 provides a deployment-facing acceptance harness in `scripts/verify-acceptance.sh` plus `docs/acceptance-test-plan.md`. The harness requires a real authenticated REST session and MCP bearer token and checks health, authorization boundaries, PNG output, preset/custom viewport semantics, blocked loopback access and MCP parity. UI acceptance remains an explicit desktop/mobile checklist. Runtime execution is intentionally deferred until a representative deployment is available.

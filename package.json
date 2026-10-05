@@ -21,7 +21,8 @@
     "start": "npm run start -w @browser-screenshot/server",
     "test:unit": "npm run test -w @browser-screenshot/server && npm run test -w @browser-screenshot/web",
     "acceptance:remote": "./scripts/verify-acceptance.sh",
-    "release:gate": "./scripts/release-gate.sh"
+    "release:gate": "./scripts/release-gate.sh",
+    "test:release-gate": "bash ./scripts/test-release-gate.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

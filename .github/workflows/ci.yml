@@ -37,6 +37,9 @@ jobs:
           SKIP_SANDBOX_RUNTIME_TESTS: "1"
         run: npm run verify
 
+      - name: Release gate regression tests
+        run: npm run test:release-gate
+
   container-smoke:
     name: Verify production container
     needs: verify
