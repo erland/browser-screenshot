@@ -3,31 +3,14 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { FastifyInstance } from 'fastify';
 import { McpServer, createMcpHandler, type AuthInfo } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
-import * as z from 'zod/v4';
 import type { McpOAuthManager } from './oauth.js';
-import {
-  ScreenshotError,
-  createScreenshot,
-  normalizeScreenshotRequest,
-  type NormalizedScreenshotRequest,
-  type ScreenshotResult,
-} from './screenshot-service.js';
-
-export type McpScreenshotCreator = (request: NormalizedScreenshotRequest, actorKey?: string) => Promise<ScreenshotResult>;
-
-const screenshotInput = z.object({
-  url: z.string().min(1).max(2048),
-  preset: z.enum(['desktop', 'tablet', 'mobile']).optional(),
-  width: z.number().int().optional(),
-  height: z.number().int().optional(),
-  deviceScaleFactor: z.number().optional(),
-  fullPage: z.boolean().optional(),
-  timeoutMs: z.number().int().optional(),
-});
+import { ScreenshotError } from './screenshot-service.js';
+import { SCREENSHOT_REQUEST_SCHEMA } from './screenshot-request.js';
+import type { ScreenshotCapability } from './screenshot-capability.js';
 
 export function createBrowserScreenshotMcpHandler(
-  screenshotCreator: McpScreenshotCreator = createScreenshot,
-  actorKeyProvider: () => string | undefined = () => undefined
+  capability: Pick<ScreenshotCapability, 'capture'>,
+  actorKeyProvider: () => string | undefined = () => undefined,
 ) {
   return createMcpHandler(() => {
     const server = new McpServer({ name: 'browser-screenshot', version: '0.1.0' });
@@ -35,7 +18,7 @@ export function createBrowserScreenshotMcpHandler(
       'screenshot_create',
       {
         description: 'Capture a PNG screenshot of a public HTTP(S) URL using a preset or custom viewport.',
-        inputSchema: screenshotInput,
+        inputSchema: SCREENSHOT_REQUEST_SCHEMA,
         annotations: {
           readOnlyHint: true,
           destructiveHint: false,
@@ -45,9 +28,8 @@ export function createBrowserScreenshotMcpHandler(
       },
       async (input) => {
         try {
-          const request = normalizeScreenshotRequest(input);
-          const actorKey = actorKeyProvider();
-          const result = actorKey === undefined ? await screenshotCreator(request) : await screenshotCreator(request, actorKey);
+          const actorKey = actorKeyProvider() ?? 'mcp:anonymous';
+          const result = await capability.capture(actorKey, input);
           const metadata = {
             width: result.width,
             height: result.height,
@@ -65,13 +47,15 @@ export function createBrowserScreenshotMcpHandler(
             structuredContent: metadata,
           };
         } catch (error) {
-          const known = error instanceof ScreenshotError ? error : new ScreenshotError('INTERNAL_FAILURE', 'The screenshot could not be created.', 500);
+          const known = error instanceof ScreenshotError
+            ? error
+            : new ScreenshotError('INTERNAL_FAILURE', 'The screenshot could not be created.', 500);
           return {
             isError: true,
             content: [{ type: 'text' as const, text: JSON.stringify({ error: { code: known.code, message: known.message } }) }],
           };
         }
-      }
+      },
     );
     return server;
   });
@@ -86,10 +70,10 @@ function wwwAuthenticate(oauth: McpOAuthManager): string {
 export async function registerMcpRoute(
   app: FastifyInstance,
   oauth: McpOAuthManager,
-  screenshotCreator: McpScreenshotCreator = createScreenshot
+  capability: Pick<ScreenshotCapability, 'capture'>,
 ): Promise<() => Promise<void>> {
   const actorContext = new AsyncLocalStorage<string>();
-  const handler = createBrowserScreenshotMcpHandler(screenshotCreator, () => actorContext.getStore());
+  const handler = createBrowserScreenshotMcpHandler(capability, () => actorContext.getStore());
   const nodeHandler = toNodeHandler(handler);
 
   app.route({

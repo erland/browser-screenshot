@@ -1,4 +1,5 @@
 import { captureWithFreshContext, launchScreenshotBrowser } from './browser.js';
+import { InternalCaptureError } from './capture-errors.js';
 
 function assertPng(buffer: Buffer): void {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -28,7 +29,7 @@ try {
       timeoutMs: 5_000,
     });
   } catch (error) {
-    blocked = /blocked|public destination|loopback|private|reserved/i.test(error instanceof Error ? error.message : String(error));
+    blocked = error instanceof InternalCaptureError && error.code === 'BLOCKED_DESTINATION';
   }
   if (!blocked) throw new Error('Private/loopback destination was not blocked in packaged runtime.');
 

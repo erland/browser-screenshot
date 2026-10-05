@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AuthManager, type AuthStore, type GithubOAuthClient } from '../src/auth.js';
 import { buildApp } from '../src/app.js';
-import type { NormalizedScreenshotRequest, ScreenshotResult } from '../src/screenshot-service.js';
+import { normalizeScreenshotRequest, type ScreenshotResult } from '../src/screenshot-service.js';
+import type { ScreenshotCapability } from '../src/screenshot-capability.js';
 
 const config = {
   clientId: 'client-id',
@@ -103,12 +104,19 @@ describe('GitHub OAuth and allowlist', () => {
   it('protects screenshot API and rechecks allowlist on every request', async () => {
     const store = createStore(true);
     const auth = new AuthManager(config, store, createGithub());
-    const capture = vi.fn(async (request: NormalizedScreenshotRequest): Promise<ScreenshotResult> => ({
-      png: Buffer.from([0x89, 0x50, 0x4e, 0x47]), width: request.width, height: request.height,
-      viewportWidth: request.width, viewportHeight: request.height, deviceScaleFactor: request.deviceScaleFactor,
-      fullPage: request.fullPage, durationMs: 1,
-    }));
-    const app = await buildApp({ serveFrontend: false, auth, screenshotRoutes: { capture } });
+    const capture = vi.fn<ScreenshotCapability['capture']>(async (_actorKey, input): Promise<ScreenshotResult> => {
+      const request = normalizeScreenshotRequest(input);
+      return {
+        png: Buffer.from([0x89, 0x50, 0x4e, 0x47]), width: request.width, height: request.height,
+        viewportWidth: request.width, viewportHeight: request.height, deviceScaleFactor: request.deviceScaleFactor,
+        fullPage: request.fullPage, durationMs: 1,
+      };
+    });
+    const app = await buildApp({
+      serveFrontend: false,
+      auth,
+      screenshotCapability: { capture, close: vi.fn(async () => undefined) },
+    });
 
     const anonymous = await app.inject({ method: 'POST', url: '/api/screenshots', payload: { url: 'https://example.com' } });
     expect(anonymous.statusCode).toBe(401);

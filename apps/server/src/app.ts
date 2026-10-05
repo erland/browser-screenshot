@@ -9,18 +9,21 @@ import type { AuthManager } from './auth.js';
 import { registerAuthRoutes } from './auth-routes.js';
 import type { McpOAuthManager } from './oauth.js';
 import { registerMcpOAuthRoutes } from './oauth.js';
-import { registerMcpRoute, type McpScreenshotCreator } from './mcp.js';
-import { ScreenshotResourceController } from './resource-controls.js';
+import { registerMcpRoute } from './mcp.js';
+import {
+  DefaultScreenshotCapability,
+  type ScreenshotCapability,
+} from './screenshot-capability.js';
 import { HTTP_BODY_LIMIT_BYTES, HTTP_REQUEST_TIMEOUT_MS, registerSecurityHooks } from './security.js';
 
 export type BuildAppOptions = {
   logger?: boolean;
   serveFrontend?: boolean;
-  screenshotRoutes?: ScreenshotRoutesOptions;
+  screenshotRoutes?: Omit<ScreenshotRoutesOptions, 'capability'>;
+  screenshotCapability?: ScreenshotCapability;
   database?: Pick<Database, 'query'>;
   auth?: AuthManager;
   mcpOAuth?: McpOAuthManager;
-  mcpScreenshotCreator?: McpScreenshotCreator;
   hsts?: boolean;
 };
 
@@ -33,8 +36,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     onConstructorPoisoning: 'error',
   });
   registerSecurityHooks(app, { hsts: options.hsts });
-  const resourceController = new ScreenshotResourceController();
-  app.addHook('onClose', async () => { await resourceController.close(); });
+
+  const screenshotCapability = options.screenshotCapability ?? new DefaultScreenshotCapability();
+  app.addHook('onClose', async () => { await screenshotCapability.close(); });
 
   app.get('/health', async () => ({ status: 'ok', service: 'browser-screenshot' }));
 
@@ -51,16 +55,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   if (options.auth) await registerAuthRoutes(app, options.auth);
   if (options.mcpOAuth) {
     await registerMcpOAuthRoutes(app, options.mcpOAuth);
-    const closeMcp = await registerMcpRoute(app, options.mcpOAuth, options.mcpScreenshotCreator ?? ((request, actorKey) => resourceController.run(actorKey ?? 'mcp:anonymous', request)));
+    const closeMcp = await registerMcpRoute(app, options.mcpOAuth, screenshotCapability);
     app.addHook('onClose', async () => { await closeMcp(); });
   }
+
   await registerScreenshotRoutes(app, {
     ...options.screenshotRoutes,
+    capability: screenshotCapability,
     authorize: options.screenshotRoutes?.authorize ?? (options.auth ? options.auth.requireAuth.bind(options.auth) : undefined),
     actorKey: options.screenshotRoutes?.actorKey ?? (options.auth ? async (request) => (await options.auth!.getSessionUser(request))?.email ?? null : undefined),
-    captureForActor: options.screenshotRoutes?.capture
-      ? options.screenshotRoutes.captureForActor
-      : (options.screenshotRoutes?.captureForActor ?? ((actorKey, request) => resourceController.run(actorKey, request))),
   });
 
   if (options.serveFrontend ?? true) {
