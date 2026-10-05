@@ -75,16 +75,23 @@ Changing `MCP_TOKEN_SECRET` invalidates all existing MCP bearer tokens. Rotate, 
 
 Create the replacement credential first, update `DATABASE_URL`, verify `/ready`, then revoke the old credential. Avoid a rotation sequence that removes the currently active credential before the application has switched.
 
+## Release model
+
+Image publication and production approval are intentionally separate. See `docs/release-model.md`. Prerelease/RC images may be used for representative acceptance before the final production gate is complete. A stable production deployment must use an immutable version tag/digest and must have a `GO` release decision for that exact image.
+
+Until IP-006 is implemented, GitHub Actions does not yet enforce this distinction automatically, so operators must not infer production approval from the existence of a stable GitHub Release or the `latest` tag alone.
+
 ## Deployment and rollback
 
 Production should deploy an immutable GHCR version tag such as `1.2.3`, not `latest`.
 
 Before deployment:
 
-1. Complete `docs/release-checklist.md`.
-2. Run `npm run release:gate` with all required evidence present.
-3. Confirm a recent PostgreSQL backup exists.
-4. Record the currently deployed image tag for rollback.
+1. Confirm the candidate image/tag being evaluated and record its immutable version/digest.
+2. Complete `docs/release-checklist.md` for that exact candidate.
+3. Run `npm run release:gate` with all required evidence present.
+4. Confirm a recent PostgreSQL backup exists.
+5. Record the currently deployed image tag for rollback.
 
 After deployment:
 
