@@ -134,7 +134,7 @@ Publishing a GitHub Release with a semantic-version tag such as `v1.2.3` builds 
 
 ### Candidate images and production approval
 
-Release semantics are defined in `docs/release-model.md`. A prerelease/RC image may be published and deployed to a representative environment to collect acceptance evidence. A stable release is considered production-approved only when the fail-closed release gate is `GO` for the exact commit/image. Until IP-006 adds workflow enforcement, the existence of a stable GitHub Release or `latest` tag must not be treated as proof of production approval.
+Release semantics are defined in `docs/release-model.md`. A prerelease/RC image may be published and deployed to a representative environment to collect acceptance evidence. A stable release is considered production-approved only when the fail-closed release gate is `GO` for the exact commit/image. For stable releases, GitHub Actions downloads the attached release-evidence package, runs the fail-closed gate and promotes the exact approved candidate digest to the stable tags and `latest`. A GitHub Release whose promotion workflow fails is not production-approved.
 
 ## End-to-end acceptance
 
