@@ -3,6 +3,7 @@ import { chromium, type Browser, type BrowserContext, type LaunchOptions, type R
 import { validatePublicUrl } from './network-policy.js';
 import { SCREENSHOT_LIMITS } from './screenshot-limits.js';
 import { startSecureProxy, type SecureProxy } from './secure-proxy.js';
+import { InternalCaptureError } from './capture-errors.js';
 
 const DEFAULT_EXECUTABLE_CANDIDATES = [
   chromium.executablePath(),
@@ -47,7 +48,7 @@ export async function resolveChromiumExecutable(): Promise<string> {
   const configured = process.env.CHROMIUM_EXECUTABLE_PATH;
   if (configured) {
     if (!(await executableExists(configured))) {
-      throw new Error(`Configured Chromium executable does not exist: ${configured}`);
+      throw new InternalCaptureError('INTERNAL_FAILURE', `Configured Chromium executable does not exist: ${configured}`);
     }
     return configured;
   }
@@ -56,7 +57,7 @@ export async function resolveChromiumExecutable(): Promise<string> {
     if (await executableExists(candidate)) return candidate;
   }
 
-  throw new Error('No Chromium executable found. Set CHROMIUM_EXECUTABLE_PATH.');
+  throw new InternalCaptureError('INTERNAL_FAILURE', 'No Chromium executable found. Set CHROMIUM_EXECUTABLE_PATH.');
 }
 
 export function buildChromiumLaunchOptions(executablePath: string, proxyUrl: string): LaunchOptions {
@@ -84,7 +85,8 @@ export async function launchScreenshotBrowser(): Promise<ScreenshotBrowser> {
     };
   } catch (error) {
     await proxy.close();
-    throw error;
+    if (error instanceof InternalCaptureError) throw error;
+    throw new InternalCaptureError('INTERNAL_FAILURE', 'Chromium could not be launched.', { cause: error });
   }
 }
 
@@ -101,7 +103,11 @@ export async function captureWithFreshContext(
   screenshotBrowser: ScreenshotBrowser,
   options: CaptureOptions,
 ): Promise<CaptureResult> {
-  await validatePublicUrl(options.url);
+  try {
+    await validatePublicUrl(options.url);
+  } catch (error) {
+    throw new InternalCaptureError('BLOCKED_DESTINATION', 'Target destination is not permitted.', { cause: error });
+  }
 
   let context: BrowserContext | undefined;
   try {
@@ -117,7 +123,14 @@ export async function captureWithFreshContext(
     await context.route('**/*', enforceRequestPolicy);
     const contextMarker = crypto.randomUUID();
     const page = await context.newPage();
-    await page.goto(options.url, { waitUntil: 'networkidle', timeout: options.timeoutMs ?? 10_000 });
+    try {
+      await page.goto(options.url, { waitUntil: 'networkidle', timeout: options.timeoutMs ?? 10_000 });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        throw new InternalCaptureError('NAVIGATION_TIMEOUT', 'Target navigation timed out.', { cause: error });
+      }
+      throw new InternalCaptureError('TARGET_FAILURE', 'Target navigation failed.', { cause: error });
+    }
     const fullPage = options.fullPage ?? false;
     const dimensions = fullPage
       ? await page.evaluate(() => ({
@@ -127,15 +140,21 @@ export async function captureWithFreshContext(
       : { width: options.width ?? 1280, height: options.height ?? 720 };
     const scale = options.deviceScaleFactor ?? 1;
     if (dimensions.width > SCREENSHOT_LIMITS.maxFullPageDimension || dimensions.height > SCREENSHOT_LIMITS.maxFullPageDimension) {
-      throw new Error(`Screenshot safety limit: rendered page dimensions exceed ${SCREENSHOT_LIMITS.maxFullPageDimension}px.`);
+      throw new InternalCaptureError('RESOURCE_LIMIT', `Rendered page dimensions exceed ${SCREENSHOT_LIMITS.maxFullPageDimension}px.`);
     }
     const renderedPixels = dimensions.width * dimensions.height * scale * scale;
     if (renderedPixels > SCREENSHOT_LIMITS.maxRenderedPixels) {
-      throw new Error(`Screenshot safety limit: rendered page exceeds ${SCREENSHOT_LIMITS.maxRenderedPixels} pixels.`);
+      throw new InternalCaptureError('RESOURCE_LIMIT', `Rendered page exceeds ${SCREENSHOT_LIMITS.maxRenderedPixels} pixels.`);
     }
-    const png = await page.screenshot({ type: 'png', fullPage });
+    let png: Buffer;
+    try {
+      png = await page.screenshot({ type: 'png', fullPage });
+    } catch (error) {
+      if (error instanceof InternalCaptureError) throw error;
+      throw new InternalCaptureError('TARGET_FAILURE', 'Target screenshot capture failed.', { cause: error });
+    }
     if (png.byteLength > SCREENSHOT_LIMITS.maxPngBytes) {
-      throw new Error(`Screenshot safety limit: PNG exceeds ${SCREENSHOT_LIMITS.maxPngBytes} bytes.`);
+      throw new InternalCaptureError('RESOURCE_LIMIT', `PNG exceeds ${SCREENSHOT_LIMITS.maxPngBytes} bytes.`);
     }
     return { png, contextMarker, width: dimensions.width, height: dimensions.height };
   } finally {
