@@ -120,7 +120,7 @@ Application-level hardening and explicitly deferred deployment controls are docu
 
 ## Coolify deployment
 
-Production packaging is documented in `docs/deployment-coolify.md`. Use `docker-compose.coolify.yml` in Coolify: it contains only the application, joins the external `coolify` network, pins Traefik to that network with `traefik.docker.network=coolify`, and expects a shared/external PostgreSQL database via `DB_*` settings. The local `docker-compose.yml` continues to include PostgreSQL for representative local testing. The image listens on port 8080, runs as Playwright's non-root `pwuser`, uses `/health` for liveness and `/ready` for database-aware readiness.
+Production packaging is documented in `docs/deployment-coolify.md`. Use `docker-compose.coolify.yml` in Coolify: it pulls the pre-built GHCR release image selected by `BROWSER_SCREENSHOT_VERSION`, contains only the application, joins the external `coolify` network, pins Traefik to that network with `traefik.docker.network=coolify`, and expects a shared/external PostgreSQL database via `DB_*` settings. The local `docker-compose.yml` continues to include PostgreSQL for representative local testing. The image listens on port 8080, runs as Playwright's non-root `pwuser`, uses `/health` for liveness and `/ready` for database-aware readiness.
 
 ## DEV-011 security correction checkpoint
 
