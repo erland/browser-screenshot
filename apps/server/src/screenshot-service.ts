@@ -1,25 +1,16 @@
 import { InternalCaptureError } from './capture-errors.js';
+import {
+  SCREENSHOT_PRESETS,
+  SCREENSHOT_REQUEST_SCHEMA,
+  type ScreenshotPreset,
+  type ScreenshotRequest,
+} from './screenshot-request.js';
 
-export const SCREENSHOT_PRESETS = {
-  desktop: { width: 1440, height: 900, deviceScaleFactor: 1 },
-  tablet: { width: 1024, height: 768, deviceScaleFactor: 1 },
-  mobile: { width: 390, height: 844, deviceScaleFactor: 2 },
-} as const;
-
-export type ScreenshotPreset = keyof typeof SCREENSHOT_PRESETS;
+export { SCREENSHOT_PRESETS, SCREENSHOT_REQUEST_SCHEMA } from './screenshot-request.js';
+export type { ScreenshotPreset, ScreenshotRequest } from './screenshot-request.js';
 
 export { SCREENSHOT_LIMITS } from './screenshot-limits.js';
 import { SCREENSHOT_LIMITS } from './screenshot-limits.js';
-
-export interface ScreenshotRequest {
-  url: string;
-  preset?: ScreenshotPreset;
-  width?: number;
-  height?: number;
-  deviceScaleFactor?: number;
-  fullPage?: boolean;
-  timeoutMs?: number;
-}
 
 export interface NormalizedScreenshotRequest {
   url: string;
@@ -68,19 +59,13 @@ function finiteNumber(value: unknown): value is number {
 }
 
 export function normalizeScreenshotRequest(value: unknown): NormalizedScreenshotRequest {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new ScreenshotError('INVALID_REQUEST', 'Request body must be a JSON object.', 400);
+  const parsed = SCREENSHOT_REQUEST_SCHEMA.safeParse(value);
+  if (!parsed.success) {
+    throw new ScreenshotError('INVALID_REQUEST', 'Request body does not match the screenshot request contract.', 400);
   }
 
-  const body = value as Record<string, unknown>;
-  if (typeof body.url !== 'string' || body.url.trim().length === 0 || body.url.length > 2048) {
-    throw new ScreenshotError('INVALID_REQUEST', 'url is required and must be a valid-length string.', 400);
-  }
-
+  const body: ScreenshotRequest = parsed.data;
   const preset = body.preset;
-  if (preset !== undefined && (typeof preset !== 'string' || !(preset in SCREENSHOT_PRESETS))) {
-    throw new ScreenshotError('INVALID_REQUEST', 'preset must be desktop, tablet or mobile.', 400);
-  }
 
   const hasWidth = body.width !== undefined;
   const hasHeight = body.height !== undefined;
@@ -91,7 +76,7 @@ export function normalizeScreenshotRequest(value: unknown): NormalizedScreenshot
     throw new ScreenshotError('INVALID_REQUEST', 'Use either preset or custom width/height, not both.', 400);
   }
 
-  const presetValues = typeof preset === 'string' ? SCREENSHOT_PRESETS[preset as ScreenshotPreset] : undefined;
+  const presetValues = preset ? SCREENSHOT_PRESETS[preset] : undefined;
   const width = hasWidth ? body.width : (presetValues?.width ?? SCREENSHOT_PRESETS.desktop.width);
   const height = hasHeight ? body.height : (presetValues?.height ?? SCREENSHOT_PRESETS.desktop.height);
 
@@ -128,7 +113,7 @@ export function normalizeScreenshotRequest(value: unknown): NormalizedScreenshot
     deviceScaleFactor,
     fullPage: body.fullPage === true,
     timeoutMs,
-    ...(typeof preset === 'string' ? { preset: preset as ScreenshotPreset } : {}),
+    ...(preset ? { preset } : {}),
   };
 }
 
