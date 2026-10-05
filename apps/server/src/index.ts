@@ -1,6 +1,6 @@
 import { buildApp } from './app.js';
 import { AuthManager, createDatabaseAuthStore, loadAuthConfig } from './auth.js';
-import { createDatabase } from './database.js';
+import { createDatabase, syncConfiguredAllowlist } from './database.js';
 import { McpOAuthManager, createDatabaseOAuthStore, loadMcpOAuthConfig } from './oauth.js';
 
 const port = Number.parseInt(process.env.PORT ?? '8080', 10);
@@ -8,6 +8,7 @@ const host = process.env.HOST ?? '0.0.0.0';
 
 const database = createDatabase();
 await database.migrate();
+await syncConfiguredAllowlist(database);
 const auth = new AuthManager(loadAuthConfig(), createDatabaseAuthStore(database));
 const mcpOAuth = new McpOAuthManager(loadMcpOAuthConfig(), createDatabaseOAuthStore(database), auth);
 
