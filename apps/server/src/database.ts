@@ -44,6 +44,22 @@ export function databaseConnectionString(env: Env = process.env): string {
   return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${formattedHost}:${port}/${encodeURIComponent(name)}`;
 }
 
+export function configuredAllowlistEmails(env: Env = process.env): readonly string[] | undefined {
+  const raw = env.BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS?.trim();
+  if (!raw) return undefined;
+
+  const emails = [...new Set(raw.split(',').map((value) => value.trim().toLowerCase()).filter(Boolean))];
+  if (emails.length === 0) return undefined;
+
+  for (const email of emails) {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new Error('Invalid configuration: BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS must contain comma-separated email addresses');
+    }
+  }
+
+  return Object.freeze(emails);
+}
+
 export function createDatabase(connectionString = databaseConnectionString()): Database {
   const pool = new Pool({ connectionString });
 
@@ -86,6 +102,34 @@ export async function runMigrations(client: Pick<pg.Pool, 'query'>): Promise<voi
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
+    throw error;
+  }
+}
+
+export async function syncConfiguredAllowlist(
+  db: Pick<Database, 'query'>,
+  emails: readonly string[] | undefined = configuredAllowlistEmails()
+): Promise<void> {
+  if (!emails || emails.length === 0) return;
+
+  await db.query('BEGIN');
+  try {
+    await db.query(
+      'UPDATE allowed_user SET enabled = false, updated_at = now() WHERE enabled = true AND NOT (lower(email) = ANY($1::text[]))',
+      [emails]
+    );
+    for (const email of emails) {
+      await db.query(
+        `INSERT INTO allowed_user (email, enabled)
+         VALUES ($1, true)
+         ON CONFLICT ((lower(email)))
+         DO UPDATE SET email = EXCLUDED.email, enabled = true, updated_at = now()`,
+        [email]
+      );
+    }
+    await db.query('COMMIT');
+  } catch (error) {
+    await db.query('ROLLBACK');
     throw error;
   }
 }
