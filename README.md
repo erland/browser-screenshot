@@ -81,12 +81,12 @@ Authentication is deliberately added in DEV-006. Until then, deployment of this 
 
 ## PostgreSQL
 
-Set `DATABASE_URL` to an external PostgreSQL instance. The service applies its schema migration before listening. `/health` is liveness and `/ready` verifies database connectivity. PostgreSQL stores identity/allowlist state only; screenshots are never persisted.
+PostgreSQL may be configured with `DATABASE_URL`, or with separate `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` settings. `DATABASE_URL` takes precedence when present; the split settings are recommended for Coolify so the password does not have to be embedded in a URL. `DB_PORT` defaults to `5432` and `DB_NAME` to `browser_screenshot`. The service applies its schema migration before listening. `/health` is liveness and `/ready` verifies database connectivity. PostgreSQL stores identity/allowlist state only; screenshots are never persisted.
 
 
 ## Authentication (DEV-006)
 
-Production startup requires GitHub OAuth and session configuration in addition to `DATABASE_URL`:
+Production startup requires GitHub OAuth/session configuration plus either `DATABASE_URL` or the split `DB_*` database settings:
 
 ```text
 GITHUB_CLIENT_ID=...
@@ -120,7 +120,7 @@ Application-level hardening and explicitly deferred deployment controls are docu
 
 ## Coolify deployment
 
-Production packaging is documented in `docs/deployment-coolify.md`. The image listens on port 8080, runs as Playwright's non-root `pwuser`, uses `/health` for liveness and `/ready` for database-aware readiness. Before production/release, run `./scripts/verify-container.sh` on a Docker-capable Linux host to prove the packaged Chromium sandbox, public screenshot smoke test, loopback blocking and PostgreSQL-backed readiness.
+Production packaging is documented in `docs/deployment-coolify.md`. Use `docker-compose.coolify.yml` in Coolify: it contains only the application, joins the external `coolify` network, pins Traefik to that network with `traefik.docker.network=coolify`, and expects a shared/external PostgreSQL database via `DB_*` settings. The local `docker-compose.yml` continues to include PostgreSQL for representative local testing. The image listens on port 8080, runs as Playwright's non-root `pwuser`, uses `/health` for liveness and `/ready` for database-aware readiness.
 
 ## DEV-011 security correction checkpoint
 
