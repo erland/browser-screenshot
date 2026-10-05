@@ -9,8 +9,7 @@ import type { AuthManager } from './auth.js';
 import { registerAuthRoutes } from './auth-routes.js';
 import type { McpOAuthManager } from './oauth.js';
 import { registerMcpOAuthRoutes } from './oauth.js';
-import { registerMcpRoute, type McpScreenshotCreator } from './mcp.js';
-import { ScreenshotResourceController } from './resource-controls.js';
+import { registerMcpRoute } from './mcp.js';
 import {
   DefaultScreenshotCapability,
   type ScreenshotCapability,
@@ -25,7 +24,6 @@ export type BuildAppOptions = {
   database?: Pick<Database, 'query'>;
   auth?: AuthManager;
   mcpOAuth?: McpOAuthManager;
-  mcpScreenshotCreator?: McpScreenshotCreator;
   hsts?: boolean;
 };
 
@@ -39,14 +37,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   registerSecurityHooks(app, { hsts: options.hsts });
 
-  const resourceController = new ScreenshotResourceController();
-  const screenshotCapability = options.screenshotCapability ?? new DefaultScreenshotCapability(resourceController);
-
-  if (options.screenshotCapability) {
-    app.addHook('onClose', async () => { await resourceController.close(); });
-  } else {
-    app.addHook('onClose', async () => { await screenshotCapability.close(); });
-  }
+  const screenshotCapability = options.screenshotCapability ?? new DefaultScreenshotCapability();
+  app.addHook('onClose', async () => { await screenshotCapability.close(); });
 
   app.get('/health', async () => ({ status: 'ok', service: 'browser-screenshot' }));
 
@@ -63,11 +55,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   if (options.auth) await registerAuthRoutes(app, options.auth);
   if (options.mcpOAuth) {
     await registerMcpOAuthRoutes(app, options.mcpOAuth);
-    const closeMcp = await registerMcpRoute(
-      app,
-      options.mcpOAuth,
-      options.mcpScreenshotCreator ?? ((request, actorKey) => resourceController.run(actorKey ?? 'mcp:anonymous', request)),
-    );
+    const closeMcp = await registerMcpRoute(app, options.mcpOAuth, screenshotCapability);
     app.addHook('onClose', async () => { await closeMcp(); });
   }
 
