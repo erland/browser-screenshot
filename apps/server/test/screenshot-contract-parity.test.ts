@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { createBrowserScreenshotMcpHandler } from '../src/mcp.js';
 import {
