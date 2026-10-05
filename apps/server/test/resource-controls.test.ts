@@ -115,12 +115,12 @@ it.each([
   await controller.close();
 });
 
-it('keeps legacy message mapping as a temporary fallback for unknown capture errors', async () => {
+it('maps unknown untyped capture failures deterministically to internal failure', async () => {
   const controller = new ScreenshotResourceController(
     { maxConcurrent: 1, rateLimitPerMinute: 10, maxJobsPerBrowser: 10 },
     async () => fakeBrowser(() => undefined),
-    async () => { throw new Error('Screenshot safety limit: rendered page exceeds 50000000 pixels.'); },
+    async () => { throw new Error('arbitrary browser-library failure text'); },
   );
-  await expect(controller.run('user@example.com', request)).rejects.toMatchObject({ code: 'RESOURCE_LIMIT', statusCode: 413 });
+  await expect(controller.run('user@example.com', request)).rejects.toMatchObject({ code: 'INTERNAL_FAILURE', statusCode: 500 });
   await controller.close();
 });
