@@ -122,6 +122,8 @@ Check protected-resource and authorization-server metadata endpoints, registered
 
 Inspect target responsiveness, resource-controller metrics/logs, queue pressure and host CPU/memory. Do not solve pressure by removing screenshot/resource limits. Scale the service only after confirming shared-state/rate-limit implications for the chosen topology.
 
+If navigation timeouts are suspected to be caused by the current Playwright `networkidle` readiness policy, use the bounded diagnostic procedure in `docs/navigation-readiness-evidence.md`. Enable `BROWSER_SCREENSHOT_NAVIGATION_EVIDENCE=1` only for the evidence window; it records hostname, outcome and duration without URL path/query data and does not change capture semantics.
+
 ### Public site works in a normal browser but screenshot is blocked
 
 Review destination DNS/IP classification and redirects. Do not add a broad private-network exception. If a specific public service resolves into a special-use range, treat it as blocked unless the security model is deliberately changed and reviewed.
