@@ -6,6 +6,7 @@ packaging:
   image_name: ghcr.io/erland/browser-screenshot
   multi_stage_build: true
   run_as_non_root: true
+  coolify_compose_file: docker-compose.coolify.yml
 target:
   platform: coolify
   environment: production
@@ -17,8 +18,12 @@ runtime:
 database:
   type: postgresql
   deployment: external
+  shared_instance_supported: true
+  default_database_name: browser_screenshot
   migrations: application_startup
   connection_via_environment: true
+  database_url_supported: true
+  split_environment_supported: true
 persistence:
   application_files: ephemeral
   volumes: []
@@ -27,6 +32,9 @@ network:
   tls: platform
   public_exposure: true
   base_path: /
+  external_network: coolify
+  traefik_network_label: coolify
+  host_port_published: false
   private_egress_block_required: true
   private_egress_block_layer: host_or_platform
 health:
@@ -40,14 +48,26 @@ configuration:
     - HOST
     - PUBLIC_BASE_URL
     - DATABASE_URL
+    - DB_HOST
+    - DB_PORT
+    - DB_NAME
+    - DB_USER
+    - DB_PASSWORD
     - GITHUB_CLIENT_ID
     - GITHUB_CLIENT_SECRET
     - SESSION_SECRET
     - MCP_TOKEN_SECRET
+  preferred_database_variables:
+    - DB_HOST
+    - DB_PORT
+    - DB_NAME
+    - DB_USER
+    - DB_PASSWORD
   secrets_via_environment: true
-  config_files: []
+  config_files:
+    - seccomp_profile.json
 delivery:
   build_in_ci: true
   publish_artifact: true
   deployment_trigger: release
-notes: Browser traffic is filtered in-app, but release also requires host/platform egress filtering against private/internal networks. The application container must not receive privileged mode or NET_ADMIN solely to implement that rule.
+notes: The Coolify compose profile does not deploy PostgreSQL. It joins the external coolify network and pins Traefik to that network. DATABASE_URL remains supported for local/dev, while production may use separate DB_* variables.
