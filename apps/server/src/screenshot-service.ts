@@ -148,19 +148,6 @@ export function mapCaptureError(error: unknown): ScreenshotError {
         return new ScreenshotError('INTERNAL_FAILURE', 'The screenshot could not be created.', 500);
     }
   }
-  const message = error instanceof Error ? error.message : String(error);
-  if (/blocked|public destination|scheme|private|loopback|reserved|metadata/i.test(message)) {
-    return new ScreenshotError('BLOCKED_DESTINATION', 'The target destination is not permitted.', 403);
-  }
-  if (/screenshot safety limit/i.test(message)) {
-    return new ScreenshotError('RESOURCE_LIMIT', 'The rendered page exceeds screenshot safety limits.', 413);
-  }
-  if (/timeout/i.test(message)) {
-    return new ScreenshotError('NAVIGATION_TIMEOUT', 'The target did not finish loading within the allowed time.', 504);
-  }
-  if (/net::|navigation|page|browser|target/i.test(message)) {
-    return new ScreenshotError('TARGET_FAILURE', 'The target page could not be captured.', 502);
-  }
   return new ScreenshotError('INTERNAL_FAILURE', 'The screenshot could not be created.', 500);
 }
 
