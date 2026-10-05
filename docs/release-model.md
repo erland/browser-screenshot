@@ -78,7 +78,7 @@ production-approved stable release
 Coolify deploys immutable version/digest
 ```
 
-The exact mechanics that enforce this lifecycle are implemented in IP-006. This document defines the policy and target semantics only.
+GitHub Actions enforces this lifecycle: prereleases build candidate images, while stable releases promote an already-verified candidate digest only after the fail-closed release gate returns GO.
 
 ## Image publication versus production approval
 
@@ -174,32 +174,81 @@ production decision = NO-GO
 
 The existence of an image or GitHub Release does not override this decision.
 
-## Current transitional state
+## Enforced stable-promotion flow
 
-At the completion of **IP-005**, this model is documented but not yet fully enforced by GitHub Actions.
+For a stable release, prepare a **draft GitHub Release** for the stable tag and attach a file named:
 
-The current `.github/workflows/release.yml` still publishes when a GitHub Release is created and currently updates `latest` for a stable semantic version.
+```text
+release-evidence.tar.gz
+```
 
-Until **IP-006** is complete:
+The archive must contain the release-evidence files at its root, including:
 
-- treat prereleases as candidates only;
-- do not interpret a stable GitHub Release as production approval unless the release gate has independently passed;
-- do not rely on `latest` as proof of release-gate approval;
-- production operators must continue to follow `docs/release-checklist.md` and `npm run release:gate`.
+```text
+source-verify.pass
+container-smoke.pass
+github-ci.pass
+ghcr-multiarch.pass
+remote-acceptance.pass
+ui-desktop.pass
+ui-mobile.pass
+production-egress-policy.pass
+backup-restore-reviewed.pass
+candidate-image.env
+```
 
-This transitional limitation is explicit so documentation does not claim enforcement that the workflow does not yet provide.
+`candidate-image.env` must contain exactly:
 
-## IP-006 target
+```text
+IMAGE=ghcr.io/erland/browser-screenshot
+DIGEST=sha256:<64 lowercase hex characters>
+COMMIT_SHA=<40 character commit SHA>
+```
 
-IP-006 must make the automation match this model.
+The candidate commit must be the same commit referenced by the stable release tag. The digest must be the exact prerelease/RC digest that was used to gather acceptance evidence.
 
-At minimum it must ensure:
+A typical package can be created from a local `.release-evidence/` directory with:
 
-1. candidate/prerelease images can still be produced for acceptance work;
-2. production promotion cannot succeed when the release gate is NO-GO;
-3. `latest` cannot move as part of an unapproved stable release;
-4. the exact commit/image being approved is tied to the evidence;
-5. existing multi-arch, SBOM and provenance behavior is preserved.
+```bash
+tar -czf release-evidence.tar.gz -C .release-evidence .
+```
+
+Attach the archive to the draft stable release **before publishing it**.
+
+When the stable release is published, GitHub Actions:
+
+1. checks out the stable tag and resolves its exact commit;
+2. downloads `release-evidence.tar.gz`;
+3. runs the fail-closed `npm run release:gate`;
+4. verifies that candidate image repository and commit match the stable release;
+5. verifies that the candidate digest contains both `linux/amd64` and `linux/arm64`;
+6. promotes that exact candidate digest to the stable version tag, Git tag and `latest`.
+
+If any step fails, the stable image tags are not moved by the workflow.
+
+### Why stable releases promote instead of rebuild
+
+Representative acceptance is performed against the candidate image. Rebuilding on the stable release would create a second artifact that had not been the exact object under acceptance.
+
+Promoting the already-tested digest preserves the relationship:
+
+```text
+tested candidate digest
+        =
+production-approved digest
+```
+
+The OCI metadata inside the promoted image remains the metadata of the candidate build. This is intentional: the promoted stable tags identify the approved artifact without changing its bytes.
+
+## Operational note
+
+The GitHub Release object itself becomes public/published before the workflow completes because the workflow is triggered by the release `published` event. A failed gate therefore means:
+
+- the GitHub Release exists,
+- but stable GHCR tags/`latest` are not promoted,
+- and the release is **not production-approved**.
+
+Production approval is represented by successful completion of the release workflow and the resulting promoted digest, not merely by the existence of the GitHub Release.
 
 ## Non-goals
 
