@@ -1,3 +1,5 @@
+import { InternalCaptureError } from './capture-errors.js';
+
 export const SCREENSHOT_PRESETS = {
   desktop: { width: 1440, height: 900, deviceScaleFactor: 1 },
   tablet: { width: 1024, height: 768, deviceScaleFactor: 1 },
@@ -132,6 +134,20 @@ export function normalizeScreenshotRequest(value: unknown): NormalizedScreenshot
 
 export function mapCaptureError(error: unknown): ScreenshotError {
   if (error instanceof ScreenshotError) return error;
+  if (error instanceof InternalCaptureError) {
+    switch (error.code) {
+      case 'BLOCKED_DESTINATION':
+        return new ScreenshotError('BLOCKED_DESTINATION', 'The target destination is not permitted.', 403);
+      case 'NAVIGATION_TIMEOUT':
+        return new ScreenshotError('NAVIGATION_TIMEOUT', 'The target did not finish loading within the allowed time.', 504);
+      case 'TARGET_FAILURE':
+        return new ScreenshotError('TARGET_FAILURE', 'The target page could not be captured.', 502);
+      case 'RESOURCE_LIMIT':
+        return new ScreenshotError('RESOURCE_LIMIT', 'The rendered page exceeds screenshot safety limits.', 413);
+      case 'INTERNAL_FAILURE':
+        return new ScreenshotError('INTERNAL_FAILURE', 'The screenshot could not be created.', 500);
+    }
+  }
   const message = error instanceof Error ? error.message : String(error);
   if (/blocked|public destination|scheme|private|loopback|reserved|metadata/i.test(message)) {
     return new ScreenshotError('BLOCKED_DESTINATION', 'The target destination is not permitted.', 403);
