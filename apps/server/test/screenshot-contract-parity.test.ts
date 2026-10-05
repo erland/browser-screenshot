@@ -31,7 +31,7 @@ function capability(): ScreenshotCapability {
   };
 }
 
-async function restAccepts(payload: unknown): Promise<boolean> {
+async function restAccepts(payload: Record<string, unknown>): Promise<boolean> {
   const app = await buildApp({ serveFrontend: false, screenshotCapability: capability() });
   try {
     const response = await app.inject({
