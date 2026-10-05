@@ -24,7 +24,8 @@ A production release is **NO-GO** until every required item below has evidence.
 - [ ] GitHub CI passed for the release commit.
 - [ ] The candidate/release image for the exact release commit produced both `linux/amd64` and `linux/arm64` GHCR manifests.
 - [ ] Image provenance/SBOM generation completed.
-- [ ] The exact image digest selected for production is recorded.
+- [ ] The exact image digest selected for production is recorded in `candidate-image.env` together with the candidate commit SHA.
+- [ ] The stable draft GitHub Release contains `release-evidence.tar.gz` before publication.
 
 ## Acceptance
 
@@ -46,7 +47,7 @@ A production release is **NO-GO** until every required item below has evidence.
 
 - A candidate/prerelease image may exist before all production evidence is complete.
 - A stable version is production-approved only when this checklist and `npm run release:gate` are `GO` for the exact release commit/image.
-- `latest` must not be treated as production-approval evidence until IP-006 enforces the release model in GitHub Actions.
+- Stable GHCR tags and `latest` are promoted only after GitHub Actions has run the fail-closed release gate against the attached evidence package.
 
 ## Release decision
 
