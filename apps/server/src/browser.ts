@@ -4,6 +4,11 @@ import { validatePublicUrl } from './network-policy.js';
 import { SCREENSHOT_LIMITS } from './screenshot-limits.js';
 import { startSecureProxy, type SecureProxy } from './secure-proxy.js';
 import { InternalCaptureError } from './capture-errors.js';
+import {
+  emitNavigationEvidence,
+  navigationEvidenceHost,
+  startNavigationEvidence,
+} from './navigation-evidence.js';
 
 const DEFAULT_EXECUTABLE_CANDIDATES = [
   chromium.executablePath(),
@@ -123,12 +128,35 @@ export async function captureWithFreshContext(
     await context.route('**/*', enforceRequestPolicy);
     const contextMarker = crypto.randomUUID();
     const page = await context.newPage();
+    const navigationTimeoutMs = options.timeoutMs ?? 10_000;
+    const navigationDurationMs = startNavigationEvidence();
     try {
-      await page.goto(options.url, { waitUntil: 'networkidle', timeout: options.timeoutMs ?? 10_000 });
+      await page.goto(options.url, { waitUntil: 'networkidle', timeout: navigationTimeoutMs });
+      emitNavigationEvidence({
+        host: navigationEvidenceHost(options.url),
+        waitUntil: 'networkidle',
+        timeoutMs: navigationTimeoutMs,
+        durationMs: navigationDurationMs(),
+        outcome: 'success',
+      });
     } catch (error) {
       if (error instanceof Error && error.name === 'TimeoutError') {
+        emitNavigationEvidence({
+          host: navigationEvidenceHost(options.url),
+          waitUntil: 'networkidle',
+          timeoutMs: navigationTimeoutMs,
+          durationMs: navigationDurationMs(),
+          outcome: 'timeout',
+        });
         throw new InternalCaptureError('NAVIGATION_TIMEOUT', 'Target navigation timed out.', { cause: error });
       }
+      emitNavigationEvidence({
+        host: navigationEvidenceHost(options.url),
+        waitUntil: 'networkidle',
+        timeoutMs: navigationTimeoutMs,
+        durationMs: navigationDurationMs(),
+        outcome: 'failure',
+      });
       throw new InternalCaptureError('TARGET_FAILURE', 'Target navigation failed.', { cause: error });
     }
     const fullPage = options.fullPage ?? false;
