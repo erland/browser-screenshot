@@ -1,5 +1,7 @@
 # Release checklist – Browser Screenshot
 
+Release semantics and the distinction between candidate image publication and production approval are defined in `docs/release-model.md`.
+
 A production release is **NO-GO** until every required item below has evidence.
 
 ## Source and documentation
@@ -20,7 +22,7 @@ A production release is **NO-GO** until every required item below has evidence.
 ## CI and release artifacts
 
 - [ ] GitHub CI passed for the release commit.
-- [ ] A semantic-version GitHub Release produced both `linux/amd64` and `linux/arm64` GHCR manifests.
+- [ ] The candidate/release image for the exact release commit produced both `linux/amd64` and `linux/arm64` GHCR manifests.
 - [ ] Image provenance/SBOM generation completed.
 - [ ] The exact image digest selected for production is recorded.
 
@@ -39,6 +41,12 @@ A production release is **NO-GO** until every required item below has evidence.
 - [ ] Log collection/retention and basic alerts are configured.
 - [ ] Secret owners and rotation process are known.
 - [ ] `docs/operations-runbook.md` is available to the operator.
+
+## Release semantics
+
+- A candidate/prerelease image may exist before all production evidence is complete.
+- A stable version is production-approved only when this checklist and `npm run release:gate` are `GO` for the exact release commit/image.
+- `latest` must not be treated as production-approval evidence until IP-006 enforces the release model in GitHub Actions.
 
 ## Release decision
 
