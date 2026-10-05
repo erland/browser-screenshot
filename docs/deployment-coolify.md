@@ -8,6 +8,8 @@ The existing `docker-compose.yml` remains the representative local/development p
 
 The Coolify profile:
 
+- pulls the pre-built release image from `ghcr.io/erland/browser-screenshot` instead of building on the Coolify host;
+- selects the image tag through `BROWSER_SCREENSHOT_VERSION` (default `latest`);
 - exposes the application only inside Docker on port `8080`;
 - does not publish `8080` on the host;
 - joins the existing external Docker network `coolify`;
@@ -42,6 +44,7 @@ The database host must be reachable from the `coolify` network (or otherwise rou
 
 Recommended Coolify variables:
 
+- `BROWSER_SCREENSHOT_VERSION` – release image tag to deploy; prefer an immutable version such as `1.2.3` rather than `latest`
 - `PUBLIC_BASE_URL`
 - `DB_HOST`
 - `DB_PORT` (optional, default `5432`)
@@ -62,13 +65,15 @@ Do not bake secrets into the image or repository.
 
 1. Create the dedicated database, for example `browser_screenshot`, in the shared PostgreSQL instance.
 2. Create/use a least-privilege PostgreSQL user with access to that database.
-3. Create the Coolify application from this repository.
-4. Select `docker-compose.coolify.yml` as the Compose file.
-5. Set the environment variables listed above.
-6. Configure the public HTTPS domain in Coolify.
-7. Confirm the application is attached to the external `coolify` network.
-8. Confirm the shared PostgreSQL hostname is reachable from that network.
-9. Use `/health` for liveness and `/ready` for database-aware readiness.
+3. Publish a GitHub Release so GitHub Actions builds and pushes the multi-arch image to GHCR.
+4. Create the Coolify application from this repository.
+5. Select `docker-compose.coolify.yml` as the Compose file.
+6. Set `BROWSER_SCREENSHOT_VERSION` to the release version to deploy, for example `1.2.3`.
+7. Set the remaining environment variables listed above.
+8. Configure the public HTTPS domain in Coolify.
+9. Confirm the application is attached to the external `coolify` network.
+10. Confirm the shared PostgreSQL hostname is reachable from that network.
+11. Use `/health` for liveness and `/ready` for database-aware readiness.
 
 ## Health and startup
 
@@ -116,7 +121,13 @@ The script builds the exact production Dockerfile, launches the packaged non-roo
 
 ## GHCR release delivery
 
-The release workflow publishes the same production `Dockerfile` to GHCR when a GitHub Release is published from a semantic-version tag. Images are built for both `linux/amd64` and `linux/arm64`.
+The release workflow publishes the production image to GHCR when a GitHub Release is published from a semantic-version tag. Images are built for both `linux/amd64` and `linux/arm64`.
+
+`docker-compose.coolify.yml` does not contain `build: .`; Coolify pulls `ghcr.io/erland/browser-screenshot:${BROWSER_SCREENSHOT_VERSION:-latest}` instead. This keeps image compilation and the heavy Playwright build workload on GitHub Actions rather than the Coolify server.
+
+For production, set `BROWSER_SCREENSHOT_VERSION` to an immutable release version such as `1.2.3`. Use `latest` only when intentionally tracking the newest stable release.
+
+If the GHCR package is private, configure Coolify with GitHub Container Registry credentials that can pull the package.
 
 ## Operations and release gate
 
