@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { databaseConnectionString, isEmailAllowed, upsertGithubUser } from '../src/database.js';
+import {
+  configuredAllowlistEmails,
+  databaseConnectionString,
+  isEmailAllowed,
+  syncConfiguredAllowlist,
+  upsertGithubUser,
+} from '../src/database.js';
 
 describe('database helpers', () => {
   it('prefers DATABASE_URL when explicitly configured', () => {
@@ -48,6 +54,52 @@ describe('database helpers', () => {
 
   it('requires split database credentials when DATABASE_URL is absent', () => {
     expect(() => databaseConnectionString({ DB_HOST: 'postgres' })).toThrow(/DB_USER/);
+  });
+
+  it('normalizes and de-duplicates configured allowlist emails', () => {
+    expect(configuredAllowlistEmails({
+      BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS: ' User@Example.COM, second@example.com, user@example.com ',
+    })).toEqual(['user@example.com', 'second@example.com']);
+  });
+
+  it('treats a missing or empty environment allowlist as unmanaged', () => {
+    expect(configuredAllowlistEmails({})).toBeUndefined();
+    expect(configuredAllowlistEmails({ BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS: '   ' })).toBeUndefined();
+  });
+
+  it('rejects invalid configured allowlist emails', () => {
+    expect(() => configuredAllowlistEmails({
+      BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS: 'valid@example.com,not-an-email',
+    })).toThrow(/BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS/);
+  });
+
+  it('does not modify the database when the environment allowlist is unmanaged', async () => {
+    const query = vi.fn();
+    await syncConfiguredAllowlist({ query } as never, undefined);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('synchronizes an authoritative environment allowlist transactionally', async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 0 });
+    await syncConfiguredAllowlist({ query } as never, ['user@example.com', 'second@example.com']);
+
+    expect(query.mock.calls[0]).toEqual(['BEGIN']);
+    expect(query.mock.calls[1][0]).toContain('UPDATE allowed_user SET enabled = false');
+    expect(query.mock.calls[1][1]).toEqual([['user@example.com', 'second@example.com']]);
+    expect(query.mock.calls[2][0]).toContain('INSERT INTO allowed_user');
+    expect(query.mock.calls[2][1]).toEqual(['user@example.com']);
+    expect(query.mock.calls[3][1]).toEqual(['second@example.com']);
+    expect(query.mock.calls[4]).toEqual(['COMMIT']);
+  });
+
+  it('rolls back a failed environment allowlist synchronization', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockRejectedValueOnce(new Error('database failure'))
+      .mockResolvedValue({ rows: [], rowCount: 0 });
+
+    await expect(syncConfiguredAllowlist({ query } as never, ['user@example.com'])).rejects.toThrow('database failure');
+    expect(query).toHaveBeenLastCalledWith('ROLLBACK');
   });
 
   it('uses stable GitHub subject as identity key and updates mutable metadata', async () => {

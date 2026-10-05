@@ -50,6 +50,7 @@ Recommended Coolify variables:
 - `DB_PASSWORD`
 - `GITHUB_CLIENT_ID`
 - `GITHUB_CLIENT_SECRET`
+- `BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS` – optional comma-separated authoritative allowlist
 - `SESSION_SECRET` – random secret of at least 32 characters.
 - `MCP_TOKEN_SECRET` – independent random secret of at least 32 characters.
 
@@ -89,15 +90,17 @@ The external `coolify` network and `traefik.docker.network=coolify` solve revers
 
 Do not add `NET_ADMIN` or privileged mode to Browser Screenshot to implement egress filtering inside the application container.
 
-## Allowlist bootstrap
+## Allowlist configuration
 
-After migrations, add enabled e-mail addresses to `allowed_user`. Example SQL:
+For Coolify, the recommended setup is to manage the allowlist with:
 
-```sql
-INSERT INTO allowed_user (email, enabled)
-VALUES ('user@example.com', true)
-ON CONFLICT ((lower(email))) DO UPDATE SET enabled = EXCLUDED.enabled;
-```
+`BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS=user@example.com,second@example.com`
+
+When the variable is set and non-empty, it is authoritative at startup: addresses are normalized to lowercase, duplicates are removed, listed addresses are enabled, and previously enabled addresses not present in the variable are disabled. The sync runs after migrations and is transactional.
+
+When the variable is missing or empty, startup does not modify `allowed_user`; SQL/manual database administration remains available.
+
+Invalid e-mail values fail startup rather than silently changing authorization.
 
 Only verified GitHub e-mail addresses matching an enabled allowlist entry can authenticate.
 

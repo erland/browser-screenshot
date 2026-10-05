@@ -55,6 +55,7 @@ configuration:
     - DB_PASSWORD
     - GITHUB_CLIENT_ID
     - GITHUB_CLIENT_SECRET
+    - BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS
     - SESSION_SECRET
     - MCP_TOKEN_SECRET
   preferred_database_variables:
