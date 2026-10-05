@@ -3,17 +3,14 @@ import {
   SCREENSHOT_LIMITS,
   SCREENSHOT_PRESETS,
   ScreenshotError,
-  createScreenshot,
-  normalizeScreenshotRequest,
-  type NormalizedScreenshotRequest,
-  type ScreenshotResult,
 } from './screenshot-service.js';
+import type { ScreenshotCapability } from './screenshot-capability.js';
 
 export interface ScreenshotRoutesOptions {
-  capture?: (request: NormalizedScreenshotRequest) => Promise<ScreenshotResult>;
+  capability: Pick<ScreenshotCapability, 'capture'>;
   authorize?: preHandlerHookHandler;
   actorKey?: (request: FastifyRequest) => Promise<string | null>;
-  captureForActor?: (actorKey: string, request: NormalizedScreenshotRequest) => Promise<ScreenshotResult>;
+  anonymousActorKey?: string;
 }
 
 function errorBody(error: ScreenshotError) {
@@ -25,11 +22,9 @@ function errorBody(error: ScreenshotError) {
   };
 }
 
-export async function registerScreenshotRoutes(app: FastifyInstance, options: ScreenshotRoutesOptions = {}): Promise<void> {
-  const capture = options.capture ?? createScreenshot;
-  const captureForActor = options.captureForActor;
-
+export async function registerScreenshotRoutes(app: FastifyInstance, options: ScreenshotRoutesOptions): Promise<void> {
   const protectedRoute = options.authorize ? { preHandler: options.authorize } : {};
+  const anonymousActorKey = options.anonymousActorKey ?? 'rest:anonymous';
 
   app.get('/api/screenshot-presets', protectedRoute, async () => ({
     presets: SCREENSHOT_PRESETS,
@@ -37,19 +32,9 @@ export async function registerScreenshotRoutes(app: FastifyInstance, options: Sc
   }));
 
   app.post('/api/screenshots', protectedRoute, async (request, reply) => {
-    let normalized: NormalizedScreenshotRequest;
-    try {
-      normalized = normalizeScreenshotRequest(request.body);
-    } catch (error) {
-      const screenshotError = error instanceof ScreenshotError
-        ? error
-        : new ScreenshotError('INVALID_REQUEST', 'Invalid request.', 400);
-      return reply.code(screenshotError.statusCode).send(errorBody(screenshotError));
-    }
-
     try {
       const actorKey = options.actorKey ? await options.actorKey(request) : null;
-      const result = captureForActor && actorKey ? await captureForActor(actorKey, normalized) : await capture(normalized);
+      const result = await options.capability.capture(actorKey ?? anonymousActorKey, request.body);
       return reply
         .header('content-type', 'image/png')
         .header('cache-control', 'no-store')
