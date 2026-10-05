@@ -3,20 +3,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { FastifyInstance } from 'fastify';
 import { McpServer, createMcpHandler, type AuthInfo } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
-import * as z from 'zod/v4';
 import type { McpOAuthManager } from './oauth.js';
 import { ScreenshotError } from './screenshot-service.js';
+import { SCREENSHOT_REQUEST_SCHEMA } from './screenshot-request.js';
 import type { ScreenshotCapability } from './screenshot-capability.js';
-
-const screenshotInput = z.object({
-  url: z.string().min(1).max(2048),
-  preset: z.enum(['desktop', 'tablet', 'mobile']).optional(),
-  width: z.number().int().optional(),
-  height: z.number().int().optional(),
-  deviceScaleFactor: z.number().optional(),
-  fullPage: z.boolean().optional(),
-  timeoutMs: z.number().int().optional(),
-});
 
 export function createBrowserScreenshotMcpHandler(
   capability: Pick<ScreenshotCapability, 'capture'>,
@@ -28,7 +18,7 @@ export function createBrowserScreenshotMcpHandler(
       'screenshot_create',
       {
         description: 'Capture a PNG screenshot of a public HTTP(S) URL using a preset or custom viewport.',
-        inputSchema: screenshotInput,
+        inputSchema: SCREENSHOT_REQUEST_SCHEMA,
         annotations: {
           readOnlyHint: true,
           destructiveHint: false,
