@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ScreenshotBrowser } from '../src/browser.js';
 import { ScreenshotResourceController } from '../src/resource-controls.js';
+import { InternalCaptureError } from '../src/capture-errors.js';
 
 const request = { url: 'https://example.com', width: 800, height: 600, deviceScaleFactor: 1, fullPage: false, timeoutMs: 1000 };
 
@@ -98,7 +99,23 @@ describe('resource controls', () => {
   });
 });
 
-it('maps browser safety-limit failures to a stable resource-limit error', async () => {
+it.each([
+  ['BLOCKED_DESTINATION', 'BLOCKED_DESTINATION', 403],
+  ['NAVIGATION_TIMEOUT', 'NAVIGATION_TIMEOUT', 504],
+  ['TARGET_FAILURE', 'TARGET_FAILURE', 502],
+  ['RESOURCE_LIMIT', 'RESOURCE_LIMIT', 413],
+  ['INTERNAL_FAILURE', 'INTERNAL_FAILURE', 500],
+] as const)('maps typed %s capture failures to stable %s errors', async (internalCode, publicCode, statusCode) => {
+  const controller = new ScreenshotResourceController(
+    { maxConcurrent: 1, rateLimitPerMinute: 10, maxJobsPerBrowser: 10 },
+    async () => fakeBrowser(() => undefined),
+    async () => { throw new InternalCaptureError(internalCode, 'internal capture failure'); },
+  );
+  await expect(controller.run('user@example.com', request)).rejects.toMatchObject({ code: publicCode, statusCode });
+  await controller.close();
+});
+
+it('keeps legacy message mapping as a temporary fallback for unknown capture errors', async () => {
   const controller = new ScreenshotResourceController(
     { maxConcurrent: 1, rateLimitPerMinute: 10, maxJobsPerBrowser: 10 },
     async () => fakeBrowser(() => undefined),
