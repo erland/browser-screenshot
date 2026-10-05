@@ -1,6 +1,3 @@
-import { performance } from 'node:perf_hooks';
-import { captureWithFreshContext, launchScreenshotBrowser } from './browser.js';
-
 export const SCREENSHOT_PRESETS = {
   desktop: { width: 1440, height: 900, deviceScaleFactor: 1 },
   tablet: { width: 1024, height: 768, deviceScaleFactor: 1 },
@@ -151,24 +148,3 @@ export function mapCaptureError(error: unknown): ScreenshotError {
   return new ScreenshotError('INTERNAL_FAILURE', 'The screenshot could not be created.', 500);
 }
 
-export async function createScreenshot(request: NormalizedScreenshotRequest): Promise<ScreenshotResult> {
-  const started = performance.now();
-  const screenshotBrowser = await launchScreenshotBrowser();
-  try {
-    const captured = await captureWithFreshContext(screenshotBrowser, request);
-    return {
-      png: captured.png,
-      width: captured.width,
-      height: captured.height,
-      viewportWidth: request.width,
-      viewportHeight: request.height,
-      deviceScaleFactor: request.deviceScaleFactor,
-      fullPage: request.fullPage,
-      durationMs: Math.max(0, Math.round(performance.now() - started)),
-    };
-  } catch (error) {
-    throw mapCaptureError(error);
-  } finally {
-    await screenshotBrowser.close();
-  }
-}
