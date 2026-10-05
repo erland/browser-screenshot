@@ -79,7 +79,7 @@ Create the replacement credential first, update `DATABASE_URL`, verify `/ready`,
 
 Image publication and production approval are intentionally separate. See `docs/release-model.md`. Prerelease/RC images may be used for representative acceptance before the final production gate is complete. A stable production deployment must use an immutable version tag/digest and must have a `GO` release decision for that exact image.
 
-Until IP-006 is implemented, GitHub Actions does not yet enforce this distinction automatically, so operators must not infer production approval from the existence of a stable GitHub Release or the `latest` tag alone.
+GitHub Actions enforces the distinction: prereleases publish candidate images, while stable releases require an attached `release-evidence.tar.gz` and promote the exact approved candidate digest only after the fail-closed release gate returns `GO`.
 
 ## Deployment and rollback
 
@@ -91,7 +91,9 @@ Before deployment:
 2. Complete `docs/release-checklist.md` for that exact candidate.
 3. Run `npm run release:gate` with all required evidence present.
 4. Confirm a recent PostgreSQL backup exists.
-5. Record the currently deployed image tag for rollback.
+5. Create the stable GitHub Release as a draft and attach `release-evidence.tar.gz` containing the required `.release-evidence` files plus `candidate-image.env` for the exact accepted candidate digest and commit.
+6. Publish the stable release and require the release workflow to succeed before treating it as production-approved.
+7. Record the currently deployed image tag/digest for rollback.
 
 After deployment:
 
