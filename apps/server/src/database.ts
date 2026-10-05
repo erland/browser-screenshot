@@ -6,17 +6,45 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
+type Env = Readonly<Record<string, string | undefined>>;
+
 export type Database = {
   query<T extends pg.QueryResultRow = pg.QueryResultRow>(text: string, values?: unknown[]): Promise<pg.QueryResult<T>>;
   close(): Promise<void>;
   migrate(): Promise<void>;
 };
 
-export function createDatabase(connectionString = process.env.DATABASE_URL): Database {
-  if (!connectionString) {
-    throw new Error('DATABASE_URL is required');
-  }
+function required(env: Env, key: string): string {
+  const value = env[key]?.trim();
+  if (!value) throw new Error(`Missing required database configuration: ${key}`);
+  return value;
+}
 
+function databasePort(env: Env): number {
+  const raw = env.DB_PORT?.trim();
+  if (!raw) return 5432;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new Error('Invalid database configuration: DB_PORT must be an integer between 1 and 65535');
+  }
+  return value;
+}
+
+export function databaseConnectionString(env: Env = process.env): string {
+  const explicit = env.DATABASE_URL?.trim();
+  if (explicit) return explicit;
+
+  const user = required(env, 'DB_USER');
+  const password = required(env, 'DB_PASSWORD');
+  const host = required(env, 'DB_HOST');
+  const name = env.DB_NAME?.trim() || 'browser_screenshot';
+  const port = databasePort(env);
+
+  const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${formattedHost}:${port}/${encodeURIComponent(name)}`;
+}
+
+export function createDatabase(connectionString = databaseConnectionString()): Database {
   const pool = new Pool({ connectionString });
 
   return {

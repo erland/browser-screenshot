@@ -1,0 +1,33 @@
+services:
+  app:
+    build: .
+    environment:
+      PORT: "8080"
+      HOST: "0.0.0.0"
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL}"
+      DB_HOST: "${DB_HOST}"
+      DB_PORT: "${DB_PORT:-5432}"
+      DB_NAME: "${DB_NAME:-browser_screenshot}"
+      DB_USER: "${DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+      GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID}"
+      GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET}"
+      SESSION_SECRET: "${SESSION_SECRET}"
+      MCP_TOKEN_SECRET: "${MCP_TOKEN_SECRET}"
+    expose:
+      - "8080"
+    shm_size: 1gb
+    init: true
+    security_opt:
+      - seccomp=./seccomp_profile.json
+    networks:
+      - coolify
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+    restart: unless-stopped
+
+networks:
+  coolify:
+    external: true
+    name: coolify
