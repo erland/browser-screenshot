@@ -87,6 +87,12 @@ The repository contains Playwright's seccomp profile in `seccomp_profile.json`. 
 
 Allocate approximately 1 GiB shared memory when the platform allows it; both compose profiles use `shm_size: 1gb`.
 
+## Production egress discovery
+
+Before changing Docker networking or host firewall rules, run the IP-001 discovery in the actual Coolify environment. See [egress-discovery.md](egress-discovery.md) and use `scripts/inspect-egress.sh` from inside the deployed container. The discovery is intentionally read-only and only probes internal targets that the operator explicitly names.
+
+Do not mark the production egress requirement as satisfied from repository inspection alone; host firewall and Coolify-generated networking are outside the repository boundary.
+
 ## Network security requirement
 
 Application-level protection is mandatory and implemented by the validating HTTP/CONNECT proxy plus Playwright routing. Production should additionally prevent the Browser Screenshot workload from reaching unrelated private/internal networks directly while still allowing the explicitly required PostgreSQL destination and public Internet access.
