@@ -1,6 +1,7 @@
 services:
   app:
-    build: .
+    image: "ghcr.io/erland/browser-screenshot:${BROWSER_SCREENSHOT_VERSION:-latest}"
+    pull_policy: always
     environment:
       PORT: "8080"
       HOST: "0.0.0.0"
