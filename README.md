@@ -95,7 +95,7 @@ SESSION_SECRET=<at least 32 random characters>
 PUBLIC_BASE_URL=https://browser-screenshot.example.com
 ```
 
-GitHub OAuth establishes identity. Authorization is separate: the verified GitHub email address must exist as an enabled row in `allowed_user`. The service rechecks that allowlist on every protected request. GitHub access tokens are used only during the callback and are never stored. Browser sessions use an 8-hour HMAC-signed `HttpOnly; Secure; SameSite=Lax` cookie.
+GitHub OAuth establishes identity. Authorization is separate: the verified GitHub email address must exist as an enabled row in `allowed_user`. For deployment, `BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS` may contain a comma-separated authoritative allowlist; when it is set the database allowlist is synchronized at startup, while a missing/empty value leaves database-managed entries untouched. The service rechecks the allowlist on every protected request. GitHub access tokens are used only during the callback and are never stored. Browser sessions use an 8-hour HMAC-signed `HttpOnly; Secure; SameSite=Lax` cookie.
 
 The screenshot API and preset endpoint are protected in production; `/health`, `/ready`, `/auth/login` and `/auth/callback` remain available as required for operation and login.
 
