@@ -5,6 +5,8 @@ packaging:
   image_registry: ghcr
   image_name: ghcr.io/erland/browser-screenshot
   multi_stage_build: true
+  coolify_builds_image: false
+  coolify_image_variable: BROWSER_SCREENSHOT_VERSION
   run_as_non_root: true
   coolify_compose_file: docker-compose.coolify.yml
 target:
@@ -44,6 +46,7 @@ health:
   startup_endpoint: /ready
 configuration:
   environment_variables:
+    - BROWSER_SCREENSHOT_VERSION
     - PORT
     - HOST
     - PUBLIC_BASE_URL
@@ -71,4 +74,4 @@ delivery:
   build_in_ci: true
   publish_artifact: true
   deployment_trigger: release
-notes: The Coolify compose profile does not deploy PostgreSQL. It joins the external coolify network and pins Traefik to that network. DATABASE_URL remains supported for local/dev, while production may use separate DB_* variables.
+notes: The Coolify compose profile does not build the application image or deploy PostgreSQL. GitHub Actions builds release images in GHCR, Coolify pulls the tag selected by BROWSER_SCREENSHOT_VERSION, joins the external coolify network, and pins Traefik to that network. DATABASE_URL remains supported for local/dev, while production may use separate DB_* variables.
