@@ -132,9 +132,11 @@ GitHub Actions runs the canonical source verification on pushes and pull request
 
 Publishing a GitHub Release with a semantic-version tag such as `v1.2.3` builds and pushes a multi-architecture image for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/<repository>`. The release produces deterministic tags for both the normalized version (`1.2.3`) and the Git tag (`v1.2.3`); stable releases also update `latest`. Pre-release versions such as `v1.2.3-rc.1` never update `latest`.
 
-### Candidate images and production approval
+### Release publication and production readiness
 
-Release semantics are defined in `docs/release-model.md`. A prerelease/RC image may be published and deployed to a representative environment to collect acceptance evidence. A stable release is considered production-approved only when the fail-closed release gate is `GO` for the exact commit/image. For stable releases, GitHub Actions downloads the attached release-evidence package, runs the fail-closed gate and promotes the exact approved candidate digest to the stable tags and `latest`. A GitHub Release whose promotion workflow fails is not production-approved.
+Release semantics are defined in `docs/release-model.md`. Publishing either a stable release or prerelease builds the corresponding multi-architecture GHCR image directly from the release tag with SBOM and provenance. Stable releases also update `latest`; prereleases do not.
+
+Production-readiness checks remain separate from artifact publication. `docs/release-checklist.md` and the optional `npm run release:gate` helper can still be used for a stricter operational GO/NO-GO decision, but no `release-evidence.tar.gz` asset is required for GitHub Actions to publish a release image.
 
 ## End-to-end acceptance
 
@@ -142,10 +144,10 @@ DEV-013 provides a deployment-facing acceptance harness in `scripts/verify-accep
 
 ## Release readiness and operations
 
-Operational guidance is in `docs/operations-runbook.md` and the production gate is in `docs/release-checklist.md`. The executable gate is intentionally fail-closed:
+Operational guidance is in `docs/operations-runbook.md` and production-readiness checks are in `docs/release-checklist.md`. For environments that require a formal evidence-based decision, the existing fail-closed helper remains available:
 
 ```bash
 npm run release:gate
 ```
 
-It checks required project/release files and refuses `GO` until `.release-evidence/` contains evidence for canonical source verification, production-container smoke, GitHub CI, GHCR multi-arch publishing, remote acceptance, desktop/mobile UI acceptance, production egress policy and backup/restore review. Development-time deferrals therefore cannot accidentally be treated as production release approval.
+The helper is now independent of image publication: a GitHub Release builds and publishes its GHCR image directly, while the operator can apply the stricter GO/NO-GO gate when appropriate.
