@@ -109,7 +109,7 @@ grep -Fq "Build and push release image" "$workflow" || { echo "FAIL: direct rele
 grep -Fq "platforms: linux/amd64,linux/arm64" "$workflow" || { echo "FAIL: multi-arch platforms missing" >&2; exit 1; }
 grep -Fq "provenance: mode=max" "$workflow" || { echo "FAIL: provenance missing" >&2; exit 1; }
 grep -Fq "sbom: true" "$workflow" || { echo "FAIL: SBOM generation missing" >&2; exit 1; }
-grep -Fq "type=raw,value=latest,enable=${{ steps.version.outputs.stable == 'true' }}" "$workflow" || { echo "FAIL: latest is not restricted to stable releases" >&2; exit 1; }
+grep -Fq 'type=raw,value=latest,enable=${{ steps.version.outputs.stable == '\''true'\'' }}' "$workflow" || { echo "FAIL: latest is not restricted to stable releases" >&2; exit 1; }
 
 if grep -Fq "release-evidence.tar.gz" "$workflow"; then
   echo "FAIL: release workflow must not require release-evidence.tar.gz" >&2
