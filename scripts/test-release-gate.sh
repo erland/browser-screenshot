@@ -66,7 +66,7 @@ run_gate() {
   RELEASE_EVIDENCE_DIR="$evidence_dir" "$@" ./scripts/release-gate.sh
 }
 
-echo "== release-gate regression tests =="
+echo "== manual release-readiness gate regression tests =="
 
 empty="$tmp/empty"
 mkdir -p "$empty"
@@ -105,26 +105,23 @@ echo
 echo "== release workflow structural regression tests =="
 workflow=".github/workflows/release.yml"
 
-grep -Fq "if: steps.version.outputs.stable != 'true'" "$workflow" || { echo "FAIL: prerelease conditional missing" >&2; exit 1; }
-grep -Fq "Build and push prerelease candidate" "$workflow" || { echo "FAIL: prerelease candidate build missing" >&2; exit 1; }
-grep -Fq "Enforce stable production release gate" "$workflow" || { echo "FAIL: stable release gate step missing" >&2; exit 1; }
-grep -Fq "Promote approved candidate digest" "$workflow" || { echo "FAIL: stable promotion step missing" >&2; exit 1; }
-grep -Fq -- '--tag "$IMAGE:latest"' "$workflow" || { echo "FAIL: latest promotion tag missing" >&2; exit 1; }
+grep -Fq "Build and push release image" "$workflow" || { echo "FAIL: direct release image build missing" >&2; exit 1; }
+grep -Fq "platforms: linux/amd64,linux/arm64" "$workflow" || { echo "FAIL: multi-arch platforms missing" >&2; exit 1; }
+grep -Fq "provenance: mode=max" "$workflow" || { echo "FAIL: provenance missing" >&2; exit 1; }
+grep -Fq "sbom: true" "$workflow" || { echo "FAIL: SBOM generation missing" >&2; exit 1; }
+grep -Fq "type=raw,value=latest,enable=${{ steps.version.outputs.stable == 'true' }}" "$workflow" || { echo "FAIL: latest is not restricted to stable releases" >&2; exit 1; }
 
-gate_line="$(grep -n "Enforce stable production release gate" "$workflow" | head -n1 | cut -d: -f1)"
-promote_line="$(grep -n "Promote approved candidate digest" "$workflow" | head -n1 | cut -d: -f1)"
-if [[ -z "$gate_line" || -z "$promote_line" || "$gate_line" -ge "$promote_line" ]]; then
-  echo "FAIL: stable promotion is not structurally ordered after the release gate" >&2
+if grep -Fq "release-evidence.tar.gz" "$workflow"; then
+  echo "FAIL: release workflow must not require release-evidence.tar.gz" >&2
+  exit 1
+fi
+if grep -Fq "Promote approved candidate digest" "$workflow"; then
+  echo "FAIL: release workflow must build the release image directly" >&2
   exit 1
 fi
 
-meta_block="$(awk '/Generate prerelease image metadata/{flag=1} flag{print} /Build and push prerelease candidate/{exit}' "$workflow")"
-if grep -Fq 'value=latest' <<<"$meta_block"; then
-  echo "FAIL: prerelease metadata must not create latest" >&2
-  exit 1
-fi
-
-echo "PASS: prerelease path does not declare latest"
-echo "PASS: stable gate is ordered before stable promotion"
+echo "PASS: stable releases build directly and may update latest"
+echo "PASS: prereleases build directly without updating latest"
+echo "PASS: release workflow keeps multi-arch, provenance and SBOM"
 echo
-echo "release-gate regression tests: PASS"
+echo "release workflow regression tests: PASS"
