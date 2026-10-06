@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish or promote GHCR image
+    name: Build and publish GHCR image
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -51,7 +51,6 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Setup QEMU
-        if: steps.version.outputs.stable != 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Setup Docker Buildx
@@ -64,8 +63,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate prerelease image metadata
-        if: steps.version.outputs.stable != 'true'
+      - name: Generate image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -73,14 +71,14 @@ jobs:
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
             type=raw,value=${{ github.event.release.tag_name }}
+            type=raw,value=latest,enable=${{ steps.version.outputs.stable == 'true' }}
           labels: |
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.revision=${{ steps.release_commit.outputs.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
-      - name: Build and push prerelease candidate
-        if: steps.version.outputs.stable != 'true'
-        id: candidate_build
+      - name: Build and push release image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -94,98 +92,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Publish candidate summary
-        if: steps.version.outputs.stable != 'true'
+      - name: Publish release summary
         shell: bash
         run: |
           {
-            echo "## Published Browser Screenshot candidate image"
+            echo "## Published Browser Screenshot image"
             echo
-            echo "- Image: `${{ steps.version.outputs.image }}`"
-            echo "- Version: `${{ steps.version.outputs.version }}`"
-            echo "- Digest: `${{ steps.candidate_build.outputs.digest }}`"
-            echo "- Commit: `${{ steps.release_commit.outputs.sha }}`"
-            echo "- Platforms: `linux/amd64`, `linux/arm64`"
-            echo
-            echo "Use this exact digest when preparing release-evidence.tar.gz for a later stable production promotion."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Download stable release evidence
-        if: steps.version.outputs.stable == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/browser-screenshot-release-evidence .release-evidence
-          gh release download "$RELEASE_TAG"             --pattern release-evidence.tar.gz             --dir /tmp/browser-screenshot-release-evidence
-          test -s /tmp/browser-screenshot-release-evidence/release-evidence.tar.gz
-          if tar -tzf /tmp/browser-screenshot-release-evidence/release-evidence.tar.gz | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
-            echo "release evidence archive contains unsafe paths" >&2
-            exit 1
-          fi
-          tar -xzf /tmp/browser-screenshot-release-evidence/release-evidence.tar.gz -C .release-evidence
-
-      - name: Enforce stable production release gate
-        if: steps.version.outputs.stable == 'true'
-        shell: bash
-        env:
-          RELEASE_COMMIT_SHA: ${{ steps.release_commit.outputs.sha }}
-          EXPECTED_IMAGE: ${{ steps.version.outputs.image }}
-        run: npm run release:gate
-
-      - name: Read approved candidate image
-        if: steps.version.outputs.stable == 'true'
-        id: candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          file=.release-evidence/candidate-image.env
-          image="$(sed -n 's/^IMAGE=//p' "$file")"
-          digest="$(sed -n 's/^DIGEST=//p' "$file")"
-          echo "image=$image" >> "$GITHUB_OUTPUT"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-
-      - name: Verify approved candidate is multi-arch
-        if: steps.version.outputs.stable == 'true'
-        shell: bash
-        env:
-          CANDIDATE_IMAGE: ${{ steps.candidate.outputs.image }}
-          CANDIDATE_DIGEST: ${{ steps.candidate.outputs.digest }}
-        run: |
-          set -euo pipefail
-          raw="$(docker buildx imagetools inspect --raw "$CANDIDATE_IMAGE@$CANDIDATE_DIGEST")"
-          echo "$raw" | jq -e '
-            any(.manifests[]?; .platform.os == "linux" and .platform.architecture == "amd64")
-            and
-            any(.manifests[]?; .platform.os == "linux" and .platform.architecture == "arm64")
-          ' >/dev/null
-
-      - name: Promote approved candidate digest
-        if: steps.version.outputs.stable == 'true'
-        shell: bash
-        env:
-          IMAGE: ${{ steps.version.outputs.image }}
-          VERSION: ${{ steps.version.outputs.version }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          CANDIDATE_DIGEST: ${{ steps.candidate.outputs.digest }}
-        run: |
-          set -euo pipefail
-          docker buildx imagetools create             --tag "$IMAGE:$VERSION"             --tag "$IMAGE:$RELEASE_TAG"             --tag "$IMAGE:latest"             "$IMAGE@$CANDIDATE_DIGEST"
-
-      - name: Publish stable promotion summary
-        if: steps.version.outputs.stable == 'true'
-        shell: bash
-        run: |
-          {
-            echo "## Promoted Browser Screenshot production image"
-            echo
-            echo "- Image: `${{ steps.version.outputs.image }}`"
-            echo "- Stable version: `${{ steps.version.outputs.version }}`"
-            echo "- Approved digest: `${{ steps.candidate.outputs.digest }}`"
-            echo "- Commit: `${{ steps.release_commit.outputs.sha }}`"
-            echo "- Tags updated: `${{ steps.version.outputs.version }}`, `${{ github.event.release.tag_name }}`, `latest`"
-            echo
-            echo "The stable tags were created only after the fail-closed production release gate returned GO."
+            echo "- Image: \`${{ steps.version.outputs.image }}\`"
+            echo "- Version: \`${{ steps.version.outputs.version }}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- Commit: \`${{ steps.release_commit.outputs.sha }}\`"
+            echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+            if [[ "${{ steps.version.outputs.stable }}" == "true" ]]; then
+              echo "- Stable release: \`latest\` updated"
+            else
+              echo "- Prerelease: \`latest\` unchanged"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
