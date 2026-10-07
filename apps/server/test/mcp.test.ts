@@ -34,6 +34,24 @@ describe('Browser Screenshot MCP handler', () => {
     });
     expect(info?.icons?.[0]?.src).toMatch(/^data:image\/png;base64,/);
 
+    const resources = await client.listResources();
+    expect(resources.resources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        uri: 'ui://browser-screenshot/screenshot-viewer-v1.html',
+        mimeType: 'text/html;profile=mcp-app',
+      }),
+    ]));
+    const widget = await client.readResource({
+      uri: 'ui://browser-screenshot/screenshot-viewer-v1.html',
+    });
+    expect(widget.contents[0]).toMatchObject({
+      uri: 'ui://browser-screenshot/screenshot-viewer-v1.html',
+      mimeType: 'text/html;profile=mcp-app',
+    });
+    expect(widget.contents[0]?.text).toContain('View large');
+    expect(widget.contents[0]?.text).toContain('Download PNG');
+    expect(widget.contents[0]?.text).toContain('requestDisplayMode');
+
     await client.close();
     await handler.close();
   });
@@ -65,6 +83,11 @@ describe('Browser Screenshot MCP handler', () => {
     await client.connect(transport);
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toContain('screenshot_create');
+    const screenshotTool = tools.tools.find((tool) => tool.name === 'screenshot_create');
+    expect(screenshotTool?._meta).toMatchObject({
+      ui: { resourceUri: 'ui://browser-screenshot/screenshot-viewer-v1.html' },
+      'openai/outputTemplate': 'ui://browser-screenshot/screenshot-viewer-v1.html',
+    });
 
     const called = await client.callTool({
       name: 'screenshot_create',
