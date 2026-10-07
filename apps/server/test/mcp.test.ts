@@ -44,13 +44,18 @@ describe('Browser Screenshot MCP handler', () => {
     const widget = await client.readResource({
       uri: 'ui://browser-screenshot/screenshot-viewer-v1.html',
     });
-    expect(widget.contents[0]).toMatchObject({
+    const widgetContent = widget.contents[0];
+    expect(widgetContent).toMatchObject({
       uri: 'ui://browser-screenshot/screenshot-viewer-v1.html',
       mimeType: 'text/html;profile=mcp-app',
     });
-    expect(widget.contents[0]?.text).toContain('View large');
-    expect(widget.contents[0]?.text).toContain('Download PNG');
-    expect(widget.contents[0]?.text).toContain('requestDisplayMode');
+    expect(widgetContent && 'text' in widgetContent).toBe(true);
+    if (!widgetContent || !('text' in widgetContent)) {
+      throw new Error('Expected text MCP App resource');
+    }
+    expect(widgetContent.text).toContain('View large');
+    expect(widgetContent.text).toContain('Download PNG');
+    expect(widgetContent.text).toContain('requestDisplayMode');
 
     await client.close();
     await handler.close();
