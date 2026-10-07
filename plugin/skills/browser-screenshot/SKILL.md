@@ -25,4 +25,4 @@ The service is for screenshot capture only. It does not log in, click controls, 
 
 Do not use it for localhost, private-network targets, or other resources that are not public HTTP(S) pages.
 
-Return the screenshot and the metadata reported by the tool. Do not invent page dimensions, timing, or capture settings.
+Return the screenshot and the metadata reported by the tool. When the host renders the Browser Screenshot viewer, let the user use its **View large** action for fullscreen inspection and **Download PNG** to save the capture locally. Do not invent page dimensions, timing, or capture settings.

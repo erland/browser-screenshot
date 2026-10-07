@@ -7,6 +7,7 @@ import type { McpOAuthManager } from './oauth.js';
 import { ScreenshotError } from './screenshot-service.js';
 import { SCREENSHOT_REQUEST_SCHEMA } from './screenshot-request.js';
 import type { ScreenshotCapability } from './screenshot-capability.js';
+import { SCREENSHOT_WIDGET_HTML, SCREENSHOT_WIDGET_URI } from './screenshot-widget.js';
 
 const BROWSER_SCREENSHOT_DESCRIPTION =
   'Captures PNG screenshots of public HTTP(S) web pages with desktop, tablet, mobile, or custom viewports.';
@@ -30,6 +31,36 @@ export function createBrowserScreenshotMcpHandler(
         sizes: ['64x64'],
       }],
     });
+    server.registerResource(
+      'screenshot-viewer',
+      SCREENSHOT_WIDGET_URI,
+      {
+        title: 'Screenshot viewer',
+        description: 'Interactive viewer for Browser Screenshot PNG results.',
+        mimeType: 'text/html;profile=mcp-app',
+      },
+      async () => ({
+        contents: [{
+          uri: SCREENSHOT_WIDGET_URI,
+          mimeType: 'text/html;profile=mcp-app',
+          text: SCREENSHOT_WIDGET_HTML,
+          _meta: {
+            ui: {
+              prefersBorder: true,
+              domain: 'https://browser-screenshot.apphome.one',
+              csp: {
+                connectDomains: [],
+                resourceDomains: [],
+              },
+            },
+            'openai/ui': {
+              availableDisplayModes: ['inline', 'fullscreen'],
+            },
+            'openai/widgetDescription': 'Displays the captured PNG with controls to open it fullscreen and download it.',
+          },
+        }],
+      }),
+    );
     server.registerTool(
       'screenshot_create',
       {
@@ -40,6 +71,12 @@ export function createBrowserScreenshotMcpHandler(
           destructiveHint: false,
           idempotentHint: true,
           openWorldHint: true,
+        },
+        _meta: {
+          ui: { resourceUri: SCREENSHOT_WIDGET_URI },
+          'openai/outputTemplate': SCREENSHOT_WIDGET_URI,
+          'openai/toolInvocation/invoking': 'Capturing screenshot…',
+          'openai/toolInvocation/invoked': 'Screenshot ready.',
         },
       },
       async (input) => {
