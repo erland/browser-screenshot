@@ -56,6 +56,10 @@ describe('Browser Screenshot MCP handler', () => {
     expect(widgetContent.text).toContain('View large');
     expect(widgetContent.text).toContain('Download PNG');
     expect(widgetContent.text).toContain('requestDisplayMode');
+    expect(widgetContent.text).toContain('toolResponseMetadata');
+    expect(widgetContent.text).toContain('mcp_tool_result');
+    expect(widgetContent.text).toContain('openai:set_globals');
+    expect(widgetContent.text).toContain('hydrateFromOpenAI');
 
     await client.close();
     await handler.close();

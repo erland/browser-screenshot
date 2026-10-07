@@ -69,14 +69,38 @@ export const SCREENSHOT_WIDGET_HTML = String.raw`<!doctype html>
       window.openai?.notifyIntrinsicHeight?.(document.documentElement.scrollHeight);
     }
 
+    function contentItems(result) {
+      if (!result || typeof result !== "object") return [];
+      if (Array.isArray(result.content)) return result.content;
+      if (Array.isArray(result.content_items)) return result.content_items;
+      if (result.result && typeof result.result === "object") return contentItems(result.result);
+      return [];
+    }
+
     function findImage(result) {
-      const content = Array.isArray(result?.content) ? result.content : [];
-      return content.find((item) => item?.type === "image" && typeof item?.data === "string");
+      return contentItems(result).find((item) =>
+        item?.type === "image" && typeof item?.data === "string"
+      );
+    }
+
+    function canonicalToolResult(metadata) {
+      if (!metadata || typeof metadata !== "object") return undefined;
+      return metadata.mcp_tool_result
+        ?? metadata.call_tool_result
+        ?? metadata.mcpToolResult
+        ?? metadata.callToolResult;
+    }
+
+    function structuredOutput(result) {
+      return result?.structuredContent
+        ?? result?.structured_content
+        ?? window.openai?.toolOutput
+        ?? {};
     }
 
     function render(result) {
       const image = findImage(result);
-      const meta = result?.structuredContent || {};
+      const meta = structuredOutput(result);
       const parts = [];
       if (meta.width && meta.height) parts.push(meta.width + " × " + meta.height);
       if (meta.deviceScaleFactor) parts.push("DPR " + meta.deviceScaleFactor);
@@ -120,9 +144,28 @@ export const SCREENSHOT_WIDGET_HTML = String.raw`<!doctype html>
       link.remove();
     }
 
+    function hydrateFromOpenAI(globals) {
+      const openai = window.openai;
+      latestInput = globals?.toolInput ?? openai?.toolInput ?? latestInput;
+
+      const responseMetadata =
+        globals?.toolResponseMetadata ?? openai?.toolResponseMetadata;
+      const initialResult = canonicalToolResult(responseMetadata);
+
+      if (initialResult) {
+        render(initialResult);
+        return true;
+      }
+      return false;
+    }
+
     fullscreenButton.addEventListener("click", viewLarge);
     imageEl.addEventListener("click", viewLarge);
     downloadButton.addEventListener("click", downloadImage);
+
+    window.addEventListener("openai:set_globals", (event) => {
+      hydrateFromOpenAI(event.detail?.globals);
+    }, { passive: true });
 
     window.addEventListener("message", (event) => {
       if (event.source !== window.parent) return;
@@ -136,6 +179,11 @@ export const SCREENSHOT_WIDGET_HTML = String.raw`<!doctype html>
         render(message.params);
       }
     }, { passive: true });
+
+    // ChatGPT may mount the component after the tool-result notification has
+    // already been emitted. Hydrate synchronously from the compatibility
+    // globals so the screenshot is visible on first render.
+    hydrateFromOpenAI();
 
     notifyHeight();
   </script>
