@@ -60,6 +60,10 @@ describe('Browser Screenshot MCP handler', () => {
     expect(widgetContent.text).toContain('mcp_tool_result');
     expect(widgetContent.text).toContain('openai:set_globals');
     expect(widgetContent.text).toContain('hydrateFromOpenAI');
+    expect(widgetContent.text).toContain('uploadFile');
+    expect(widgetContent.text).toContain('getFileDownloadUrl');
+    expect(widgetContent.text).toContain('openExternal');
+    expect(widgetContent.text).toContain('URL.createObjectURL');
 
     await client.close();
     await handler.close();
