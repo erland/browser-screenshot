@@ -120,11 +120,11 @@ export async function syncConfiguredAllowlist(
     );
     for (const email of emails) {
       await db.query(
-        `INSERT INTO allowed_user (email, enabled)
-         VALUES ($1, true)
+        `INSERT INTO allowed_user (id, email, enabled)
+         VALUES ($1, $2, true)
          ON CONFLICT ((lower(email)))
          DO UPDATE SET email = EXCLUDED.email, enabled = true, updated_at = now()`,
-        [email]
+        [randomUUID(), email]
       );
     }
     await db.query('COMMIT');
