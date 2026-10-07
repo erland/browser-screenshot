@@ -51,3 +51,30 @@ jobs:
 
       - name: Verify image, sandbox, network boundary and readiness
         run: ./scripts/verify-container.sh
+
+  plugin-package:
+    name: Validate Marketplace plugin package
+    runs-on: ubuntu-latest
+    env:
+      BROWSER_SCREENSHOT_MCP_URL: https://browser-screenshot.example.test/mcp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build Marketplace package
+        run: npm run plugin:build -- --version 0.0.0-ci --target marketplace
+      - name: Validate Marketplace package
+        run: |
+          test -f build/plugin-marketplace/browser-screenshot/plugin.json
+          test -f build/plugin-marketplace/browser-screenshot/mcp.json
+          test -f build/plugin-marketplace/browser-screenshot/skills/browser-screenshot/SKILL.md
+          test -f build/plugin-marketplace/browser-screenshot/assets/logo.png
+          test -f build/plugin-marketplace/browser-screenshot/assets/composer-icon.png
+          test ! -e build/plugin-marketplace/browser-screenshot/.app.json
+          test ! -e build/plugin-marketplace/browser-screenshot/.codex-plugin
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('build/plugin-marketplace/browser-screenshot/plugin.json'));const o=p.extensions?.['com.openai'];if(p.name!=='browser-screenshot'||p.version!=='0.0.0-ci'||p.apps!=null||o?.apps!=null||o?.publication?.countries?.[0]!=='SE'||o?.review?.commerce!==false)process.exit(1)"
+          node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('build/plugin-marketplace/browser-screenshot/mcp.json'));if(m.mcpServers['browser-screenshot'].type!=='streamable-http'||m.mcpServers['browser-screenshot'].url!=='https://browser-screenshot.example.test/mcp')process.exit(1)"
