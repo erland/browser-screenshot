@@ -1,0 +1,87 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "browser-screenshot",
+  "version": "__PLUGIN_VERSION__",
+  "description": "Capture PNG screenshots of public HTTP(S) web pages with desktop, tablet, mobile, or custom viewports through a remote MCP service.",
+  "author": {
+    "name": "Erland Lindmark"
+  },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Browser Screenshot",
+        "shortDescription": "Capture website screenshots",
+        "longDescription": "Open a public HTTP(S) web page in an isolated Chromium browser and return a PNG screenshot. Choose desktop, tablet, mobile, or custom viewport settings and optionally capture the full page.",
+        "developerName": "Erland Lindmark",
+        "category": "Developer Tools",
+        "capabilities": ["Interactive"],
+        "defaultPrompt": [
+          "Take a desktop screenshot of this public web page.",
+          "Capture this page as a mobile screenshot.",
+          "Take a full-page screenshot of this URL."
+        ],
+        "websiteURL": "https://browser-screenshot.apphome.one/about",
+        "supportURL": "https://browser-screenshot.apphome.one/support",
+        "privacyPolicyURL": "https://browser-screenshot.apphome.one/privacy",
+        "termsOfServiceURL": "https://browser-screenshot.apphome.one/terms",
+        "logo": "assets/logo.png",
+        "composerIcon": "assets/composer-icon.png"
+      },
+      "review": {
+        "commerce": false,
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Capture a desktop screenshot of a public HTTPS page.",
+              "prompt": "Take a desktop screenshot of https://example.com.",
+              "tools_triggered": "screenshot_create",
+              "expected_behavior": "Calls screenshot_create for the supplied public HTTPS URL with the desktop viewport and returns the PNG plus the service-provided metadata."
+            },
+            {
+              "description": "Capture a mobile screenshot of a public page.",
+              "prompt": "Show me https://example.com as a mobile screenshot.",
+              "tools_triggered": "screenshot_create",
+              "expected_behavior": "Calls screenshot_create with the mobile viewport preset and returns exactly the resulting screenshot and metadata."
+            },
+            {
+              "description": "Capture a full-page screenshot.",
+              "prompt": "Take a full-page screenshot of https://example.com.",
+              "tools_triggered": "screenshot_create",
+              "expected_behavior": "Calls screenshot_create with fullPage enabled and reports the returned dimensions and duration without inventing values."
+            },
+            {
+              "description": "Capture a custom viewport screenshot.",
+              "prompt": "Capture https://example.com at 1280 by 720 pixels.",
+              "tools_triggered": "screenshot_create",
+              "expected_behavior": "Calls screenshot_create using the requested custom viewport dimensions and returns the PNG result."
+            },
+            {
+              "description": "Capture one tablet screenshot without creating unrequested variants.",
+              "prompt": "Take one tablet screenshot of https://example.com.",
+              "tools_triggered": "screenshot_create",
+              "expected_behavior": "Calls screenshot_create once with the tablet preset and does not create additional desktop or mobile captures."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Do not use Browser Screenshot to interact with or modify a web page.",
+              "prompt": "Log in to this site and submit the form for me."
+            },
+            {
+              "description": "Do not use Browser Screenshot to access a local or private network resource.",
+              "prompt": "Take a screenshot of http://localhost:3000/admin."
+            },
+            {
+              "description": "Do not use Browser Screenshot when no screenshot or visual capture is requested.",
+              "prompt": "Explain what responsive web design means."
+            }
+          ]
+        }
+      },
+      "publication": {
+        "countries": ["SE"],
+        "release_notes": "Initial Marketplace package with remote MCP configuration, screenshot workflow skill, public support/privacy/terms pages, review cases, and plugin icons."
+      }
+    }
+  }
+}
