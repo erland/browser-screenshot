@@ -109,3 +109,48 @@ jobs:
               echo "- Prerelease: \`latest\` unchanged"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-plugin:
+    name: Build and publish OpenAI plugin
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      BROWSER_SCREENSHOT_MCP_URL: ${{ vars.BROWSER_SCREENSHOT_MCP_URL || 'https://browser-screenshot.apphome.one/mcp' }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build Marketplace plugin package
+        id: plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm run plugin:build -- --version "$VERSION" --target marketplace
+          mkdir -p build
+          (cd build/plugin-marketplace && zip -qr "../browser-screenshot-plugin-${VERSION}.zip" browser-screenshot)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "archive=build/browser-screenshot-plugin-${VERSION}.zip" >> "$GITHUB_OUTPUT"
+      - name: Inspect Marketplace plugin archive
+        run: |
+          unzip -l "${{ steps.plugin.outputs.archive }}"
+          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/plugin.json | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const p=JSON.parse(s);if(p.name!=='browser-screenshot'||p.version!=='${{ steps.plugin.outputs.version }}'||p.apps!=null||p.extensions?.['com.openai']?.apps!=null)process.exit(1)})"
+          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/mcp.json | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const m=JSON.parse(s);if(m.mcpServers?.['browser-screenshot']?.url!=='${BROWSER_SCREENSHOT_MCP_URL}')process.exit(1)})"
+          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/skills/browser-screenshot/SKILL.md >/dev/null
+          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/assets/logo.png >/dev/null
+          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/assets/composer-icon.png >/dev/null
+          if unzip -l "${{ steps.plugin.outputs.archive }}" | grep -Eq '\.app\.json|\.codex-plugin/'; then
+            echo "Marketplace upload must not contain app bindings or compatibility update manifests." >&2
+            exit 1
+          fi
+      - name: Attach plugin ZIP to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "${{ steps.plugin.outputs.archive }}" --clobber
