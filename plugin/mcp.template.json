@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "browser-screenshot": {
+      "type": "streamable-http",
+      "url": "__BROWSER_SCREENSHOT_MCP_URL__"
+    }
+  }
+}

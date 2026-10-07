@@ -8,12 +8,28 @@ import { ScreenshotError } from './screenshot-service.js';
 import { SCREENSHOT_REQUEST_SCHEMA } from './screenshot-request.js';
 import type { ScreenshotCapability } from './screenshot-capability.js';
 
+const BROWSER_SCREENSHOT_DESCRIPTION =
+  'Captures PNG screenshots of public HTTP(S) web pages with desktop, tablet, mobile, or custom viewports.';
+const BROWSER_SCREENSHOT_WEBSITE = 'https://browser-screenshot.apphome.one/about';
+const BROWSER_SCREENSHOT_ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABJklEQVR4nO2bwQ3CMBAECeLLD0ERlEIN0AD10AA1hFIogirghRShQMzZZix25x3h0eicOJHo1vv+PhNmTgvQOAAtQOMAtACNA9ACNA5AC9A4AC1A4wC0AM0i9cLraVfTowrb42XyGvkJcABagMYBaAEaB6AFaJLPAatlTQ0O+QmQD5C8BcbYHMaPmrdzvWNz6TXDE/BOhCLq4y1Q4kdqjvzUWrmTKD8BDkAL0ITvAb/c95/I9ZCfAAegBWgcgBagCT8Fhicw8omQ6yE/AQ5AC9AUeRt8fSMjPohEkZ+AcIBW3gWeRH2ytgARofSayRPQ2jfAKVJ95e8BXeT/Aq3t/yHfTmoowD8hvwUcgBagcQBagMYBaAEaB6AFaByAFqBxAFqARj7AA03iMc36yblqAAAAAElFTkSuQmCC';
+
 export function createBrowserScreenshotMcpHandler(
   capability: Pick<ScreenshotCapability, 'capture'>,
   actorKeyProvider: () => string | undefined = () => undefined,
 ) {
   return createMcpHandler(() => {
-    const server = new McpServer({ name: 'browser-screenshot', version: '0.1.0' });
+    const server = new McpServer({
+      name: 'browser-screenshot',
+      title: 'Browser Screenshot',
+      version: process.env.BROWSER_SCREENSHOT_VERSION ?? process.env.npm_package_version ?? '0.1.0',
+      description: BROWSER_SCREENSHOT_DESCRIPTION,
+      websiteUrl: BROWSER_SCREENSHOT_WEBSITE,
+      icons: [{
+        src: BROWSER_SCREENSHOT_ICON_DATA_URI,
+        mimeType: 'image/png',
+        sizes: ['64x64'],
+      }],
+    });
     server.registerTool(
       'screenshot_create',
       {

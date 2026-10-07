@@ -5,6 +5,39 @@ import { normalizeScreenshotRequest } from '../src/screenshot-service.js';
 import type { ScreenshotCapability } from '../src/screenshot-capability.js';
 
 describe('Browser Screenshot MCP handler', () => {
+  it('advertises server metadata during initialize', async () => {
+    const capture = vi.fn<ScreenshotCapability['capture']>();
+    const handler = createBrowserScreenshotMcpHandler({ capture });
+    const url = new URL('https://screenshots.example.test/mcp');
+    const transport = new StreamableHTTPClientTransport(url, {
+      fetch: async (input, init) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        return handler.fetch(request);
+      },
+    });
+    const client = new Client({ name: 'browser-screenshot-metadata-test', version: '1.0.0' });
+
+    await client.connect(transport);
+    const info = client.getServerVersion();
+
+    expect(info).toMatchObject({
+      name: 'browser-screenshot',
+      title: 'Browser Screenshot',
+      description: expect.stringContaining('PNG screenshots'),
+      websiteUrl: 'https://browser-screenshot.apphome.one/about',
+    });
+    expect(info?.version).toMatch(/\S+/);
+    expect(info?.icons).toHaveLength(1);
+    expect(info?.icons?.[0]).toMatchObject({
+      mimeType: 'image/png',
+      sizes: ['64x64'],
+    });
+    expect(info?.icons?.[0]?.src).toMatch(/^data:image\/png;base64,/);
+
+    await client.close();
+    await handler.close();
+  });
+
   it('advertises screenshot_create and routes capture through the screenshot capability', async () => {
     const capture = vi.fn<ScreenshotCapability['capture']>(async (_actorKey, input) => {
       const request = normalizeScreenshotRequest(input);
