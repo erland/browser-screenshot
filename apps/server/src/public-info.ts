@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 
 function page(title: string, body: string): string {
   return `<!doctype html><html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} – Browser Screenshot</title><style>
@@ -10,7 +10,7 @@ nav{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:24px}a{color:#175cd3}.mut
 }
 
 export async function registerPublicInfo(app: FastifyInstance): Promise<void> {
-  const send = (reply: any, title: string, body: string) =>
+  const send = (reply: FastifyReply, title: string, body: string) =>
     reply.type('text/html; charset=utf-8').header('cache-control','public, max-age=300').send(page(title, body));
 
   app.get('/about', async (_request, reply) => send(reply, 'Om tjänsten', `
