@@ -86,9 +86,12 @@ describe('database helpers', () => {
     expect(query.mock.calls[0]).toEqual(['BEGIN']);
     expect(query.mock.calls[1][0]).toContain('UPDATE allowed_user SET enabled = false');
     expect(query.mock.calls[1][1]).toEqual([['user@example.com', 'second@example.com']]);
-    expect(query.mock.calls[2][0]).toContain('INSERT INTO allowed_user');
-    expect(query.mock.calls[2][1]).toEqual(['user@example.com']);
-    expect(query.mock.calls[3][1]).toEqual(['second@example.com']);
+    expect(query.mock.calls[2][0]).toContain('INSERT INTO allowed_user (id, email, enabled)');
+    expect(query.mock.calls[2][1]).toEqual([expect.any(String), 'user@example.com']);
+    expect(query.mock.calls[3][1]).toEqual([expect.any(String), 'second@example.com']);
+    expect(query.mock.calls[2][1][0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(query.mock.calls[3][1][0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(query.mock.calls[2][1][0]).not.toBe(query.mock.calls[3][1][0]);
     expect(query.mock.calls[4]).toEqual(['COMMIT']);
   });
 
