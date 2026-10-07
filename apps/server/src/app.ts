@@ -15,6 +15,7 @@ import {
   type ScreenshotCapability,
 } from './screenshot-capability.js';
 import { HTTP_BODY_LIMIT_BYTES, HTTP_REQUEST_TIMEOUT_MS, registerSecurityHooks } from './security.js';
+import { registerPublicInfo } from './public-info.js';
 
 export type BuildAppOptions = {
   logger?: boolean;
@@ -39,6 +40,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   const screenshotCapability = options.screenshotCapability ?? new DefaultScreenshotCapability();
   app.addHook('onClose', async () => { await screenshotCapability.close(); });
+
+  await registerPublicInfo(app);
 
   app.get('/health', async () => ({ status: 'ok', service: 'browser-screenshot' }));
 
