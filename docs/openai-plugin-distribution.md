@@ -22,7 +22,7 @@ The public upload contains no `.app.json`, no non-null `apps` declaration and no
 
 ## MCP integration
 
-`mcp.json` points at `https://browser-screenshot.apphome.one/mcp`. The remote service uses OAuth and exposes one screenshot tool, `screenshot_create`.
+`mcp.json` points at `https://browser-screenshot.apphome.one/mcp`. The remote service uses OAuth and exposes one screenshot tool, `screenshot_create`. The tool keeps returning a standard MCP PNG image result and also references an MCP Apps resource at `ui://browser-screenshot/screenshot-viewer-v1.html`. Compatible ChatGPT hosts can render the capture inline, request fullscreen display, and offer a local PNG download without requiring a second tool call.
 
 ## Marketplace metadata
 
