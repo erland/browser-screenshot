@@ -133,15 +133,74 @@ export const SCREENSHOT_WIDGET_HTML = String.raw`<!doctype html>
       }
     }
 
-    function downloadImage() {
+    function base64ToFile(image, fileName) {
+      const mimeType = image.mimeType || "image/png";
+      const binary = atob(image.data);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return new File([bytes], fileName, { type: mimeType });
+    }
+
+    async function fallbackDownload(file) {
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = file.name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } finally {
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      }
+    }
+
+    async function downloadImage() {
       if (!latestImage) return;
-      const mimeType = latestImage.mimeType || "image/png";
-      const link = document.createElement("a");
-      link.href = "data:" + mimeType + ";base64," + latestImage.data;
-      link.download = fileNameFromInput();
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+
+      const originalLabel = downloadButton.textContent;
+      downloadButton.disabled = true;
+      downloadButton.textContent = "Preparing…";
+
+      try {
+        const file = base64ToFile(latestImage, fileNameFromInput());
+        const openai = window.openai;
+
+        if (openai?.uploadFile && openai?.getFileDownloadUrl) {
+          const uploaded = await openai.uploadFile(file);
+          const fileId = uploaded?.fileId;
+          if (!fileId) throw new Error("ChatGPT did not return a file id.");
+
+          const download = await openai.getFileDownloadUrl({ fileId });
+          const downloadUrl = download?.downloadUrl;
+          if (!downloadUrl) throw new Error("ChatGPT did not return a download URL.");
+
+          if (openai?.openExternal) {
+            await openai.openExternal({ href: downloadUrl, redirectUrl: false });
+          } else {
+            const link = document.createElement("a");
+            link.href = downloadUrl;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+          }
+          return;
+        }
+
+        await fallbackDownload(file);
+      } catch (error) {
+        console.error("Screenshot download failed", error);
+        emptyEl.hidden = false;
+        emptyEl.textContent = "Download failed. Please try again.";
+      } finally {
+        downloadButton.disabled = !latestImage;
+        downloadButton.textContent = originalLabel;
+        notifyHeight();
+      }
     }
 
     function hydrateFromOpenAI(globals) {
