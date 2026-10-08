@@ -78,6 +78,7 @@ export async function runMigrations(client: Pick<pg.Pool, 'query'>): Promise<voi
     ['001_identity_allowlist', resolve(currentDir, '../migrations/001_identity_allowlist.sql')],
     ['002_email_allowlist', resolve(currentDir, '../migrations/002_email_allowlist.sql')],
     ['003_mcp_oauth', resolve(currentDir, '../migrations/003_mcp_oauth.sql')],
+    ['004_mcp_refresh_token', resolve(currentDir, '../migrations/004_mcp_refresh_token.sql')],
   ] as const;
 
   await client.query('BEGIN');
