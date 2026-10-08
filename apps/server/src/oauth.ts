@@ -6,7 +6,6 @@ import { isEmailAllowed } from './database.js';
 
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const REFRESH_TOKEN_TTL_DAYS = 30;
-const REFRESH_RETRY_SECONDS = 30;
 const MCP_SCOPE = 'mcp';
 const DCR_WINDOW_MS = 10 * 60_000;
 const DCR_MAX_PER_WINDOW = 10;
