@@ -28,7 +28,7 @@ function createStore() {
     },
     async isAllowed() { return allowed; },
     async saveRefreshToken(hash, record, expiresAt) { refresh.set(hash, { record, expiresAt }); },
-    async consumeRefreshToken(hash) { const entry = refresh.get(hash); refresh.delete(hash); return entry && entry.expiresAt > new Date() ? entry.record : null; },
+    async consumeRefreshToken(hash, clientId) { const entry = refresh.get(hash); if (!entry || entry.record.clientId !== clientId) return null; refresh.delete(hash); return entry.expiresAt > new Date() ? entry.record : null; },
   };
   return store;
 }
