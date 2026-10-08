@@ -5,7 +5,7 @@ import { McpOAuthManager, pkceS256, registerMcpOAuthRoutes, type OAuthCodeRecord
 function createStore() {
   const clients = new Map<string, { clientId: string; redirectUris: string[]; clientName?: string | null }>();
   const codes = new Map<string, OAuthCodeRecord>();
-  const refresh = new Map<string, { record: { clientId: string; email: string; scope: string; resource: string }; expiresAt: Date }>();
+  const refresh = new Map<string, { record: { clientId: string; email: string; scope: string; resource: string }; expiresAt: Date; rotatedAt?: Date }>();
   let allowed = true;
   let seq = 0;
   const store: OAuthStore & { setAllowed(value: boolean): void } = {
@@ -28,7 +28,7 @@ function createStore() {
     },
     async isAllowed() { return allowed; },
     async saveRefreshToken(hash, record, expiresAt) { refresh.set(hash, { record, expiresAt }); },
-    async consumeRefreshToken(hash, clientId) { const entry = refresh.get(hash); if (!entry || entry.record.clientId !== clientId) return null; refresh.delete(hash); return entry.expiresAt > new Date() ? entry.record : null; },
+    async consumeRefreshToken(hash, clientId) { const entry = refresh.get(hash); if (!entry || entry.record.clientId !== clientId || entry.expiresAt <= new Date()) return null; if (entry.rotatedAt && Date.now() - entry.rotatedAt.getTime() > 30_000) return null; entry.rotatedAt ??= new Date(); return entry.record; },
   };
   return store;
 }
@@ -147,7 +147,7 @@ describe('MCP OAuth input hardening', () => {
 });
 
 describe('MCP OAuth refresh tokens', () => {
-  it('rotates refresh credentials and rejects replay', async () => {
+  it('rotates refresh credentials and supports bounded replay', async () => {
     const store = createStore();
     const oauth = new McpOAuthManager(config, store, { getSessionUser: async () => null } as never);
     const app = Fastify();
@@ -167,9 +167,12 @@ describe('MCP OAuth refresh tokens', () => {
     expect(first.statusCode).toBe(200);
     expect(first.json().refresh_token).toBeTruthy();
     expect(first.json().expires_in).toBe(3600);
+    const concurrent = await Promise.all([refresh(), refresh()]);
+    expect(concurrent.map(r => r.statusCode)).toEqual([200, 200]);
+    expect(new Set(concurrent.map(r => r.json().refresh_token)).size).toBe(1);
     const replay = await refresh();
-    expect(replay.statusCode).toBe(400);
-    expect(replay.json().error).toBe('invalid_grant');
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().refresh_token).toBe(first.json().refresh_token);
     await app.close();
   });
 });
