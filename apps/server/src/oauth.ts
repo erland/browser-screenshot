@@ -5,6 +5,7 @@ import type { AuthManager } from './auth.js';
 import { isEmailAllowed } from './database.js';
 
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
+const REFRESH_TOKEN_TTL_DAYS = 30;
 const MCP_SCOPE = 'mcp';
 const DCR_WINDOW_MS = 10 * 60_000;
 const DCR_MAX_PER_WINDOW = 10;
@@ -37,12 +38,16 @@ export type McpAccessToken = {
   exp: number;
 };
 
+export type OAuthRefreshRecord = { clientId: string; email: string; scope: string; resource: string };
+
 export interface OAuthStore {
   registerClient(input: { redirectUris: string[]; clientName?: string | null }): Promise<OAuthClient>;
   getClient(clientId: string): Promise<OAuthClient | null>;
   createAuthorizationCode(input: OAuthCodeRecord): Promise<string>;
   consumeAuthorizationCode(code: string): Promise<OAuthCodeRecord | null>;
   isAllowed(email: string): Promise<boolean>;
+  saveRefreshToken(hash: string, record: OAuthRefreshRecord, expiresAt: Date): Promise<void>;
+  consumeRefreshToken(hash: string, clientId: string): Promise<OAuthRefreshRecord | null>;
 }
 
 function normalizeOrigin(value: string): string {
@@ -159,6 +164,21 @@ export function createDatabaseOAuthStore(db: Pick<Database, 'query'>): OAuthStor
         resource: row.resource,
       } : null;
     },
+    async saveRefreshToken(hash, record, expiresAt) {
+      await db.query(
+        `INSERT INTO oauth_refresh_token (token_hash, client_id, email, scope, resource, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [hash, record.clientId, record.email, record.scope, record.resource, expiresAt]
+      );
+    },
+    async consumeRefreshToken(hash, clientId) {
+      const result = await db.query<{ client_id: string; email: string; scope: string; resource: string }>(
+        `DELETE FROM oauth_refresh_token WHERE token_hash = $1 AND client_id = $2 AND expires_at > now()
+         RETURNING client_id, email, scope, resource`, [hash, clientId]
+      );
+      const row = result.rows[0];
+      return row ? { clientId: row.client_id, email: row.email, scope: row.scope, resource: row.resource } : null;
+    },
     isAllowed: (email) => isEmailAllowed(db, email),
   };
 }
@@ -230,7 +250,7 @@ export class McpOAuthManager {
       client_id: client.clientId,
       client_name: client.clientName ?? undefined,
       redirect_uris: client.redirectUris,
-      grant_types: ['authorization_code'],
+      grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       token_endpoint_auth_method: 'none',
     });
@@ -287,8 +307,58 @@ export class McpOAuthManager {
     reply.header('cache-control', 'no-store').redirect(callback.toString());
   }
 
+  private async issueTokenPair(reply: FastifyReply, record: OAuthRefreshRecord): Promise<void> {
+    const exp = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL_SECONDS;
+    const accessToken = signToken({
+      email: record.email, clientId: record.clientId, scopes: [MCP_SCOPE], resource: record.resource, exp
+    }, this.config.tokenSecret);
+    const refreshToken = randomBytes(48).toString('base64url');
+    await this.store.saveRefreshToken(codeHash(refreshToken), record, new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 86400_000));
+    reply.header('cache-control', 'no-store').header('pragma', 'no-cache').send({
+      access_token: accessToken, token_type: 'Bearer',
+      expires_in: ACCESS_TOKEN_TTL_SECONDS, refresh_token: refreshToken, scope: MCP_SCOPE
+    });
+  }
+
   async token(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const startedAt = Date.now();
+    const diagnostic = (outcome: string, reason: string) =>
+      request.log.info({ event: 'oauth.refresh', request_id: request.id, outcome, reason,
+        duration_ms: Date.now() - startedAt }, 'MCP OAuth refresh');
     const body = request.body as Record<string, string | undefined> | undefined;
+
+    if (body?.grant_type === 'refresh_token') {
+      if (!body.refresh_token || body.refresh_token.length > 512 || !body.client_id || body.client_id.length > 256) {
+        diagnostic('rejected', 'missing_or_invalid_parameters');
+        sendOAuthError(reply, 400, 'invalid_request', 'refresh_token and client_id are required.');
+        return;
+      }
+      try {
+        const record = await this.store.consumeRefreshToken(codeHash(body.refresh_token), body.client_id);
+        if (!record || record.clientId !== body.client_id) {
+          diagnostic('rejected', 'invalid_grant');
+          sendOAuthError(reply, 400, 'invalid_grant', 'Refresh token is invalid or expired.');
+          return;
+        }
+        if (body.resource && body.resource !== record.resource) {
+          diagnostic('rejected', 'resource_mismatch');
+          sendOAuthError(reply, 400, 'invalid_target', 'Resource mismatch.');
+          return;
+        }
+        if (!(await this.store.isAllowed(record.email))) {
+          diagnostic('rejected', 'access_denied');
+          sendOAuthError(reply, 403, 'access_denied', 'This email address is no longer allowed.');
+          return;
+        }
+        await this.issueTokenPair(reply, record);
+        diagnostic('success', 'rotated');
+      } catch (error) {
+        diagnostic('error', 'internal_error');
+        throw error;
+      }
+      return;
+    }
+
     if (!body || body.grant_type !== 'authorization_code' || !body.code || body.code.length > 512 || !body.client_id || body.client_id.length > 256 || !body.redirect_uri || body.redirect_uri.length > 2048 || !body.code_verifier || !PKCE_VERIFIER_RE.test(body.code_verifier)) {
       sendOAuthError(reply, 400, 'invalid_request', 'authorization_code token request with client_id, redirect_uri and code_verifier is required.');
       return;
@@ -302,14 +372,7 @@ export class McpOAuthManager {
       sendOAuthError(reply, 403, 'access_denied', 'This email address is no longer allowed.');
       return;
     }
-    const exp = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL_SECONDS;
-    const accessToken = signToken({ email: record.email, clientId: record.clientId, scopes: [MCP_SCOPE], resource: record.resource, exp }, this.config.tokenSecret);
-    reply.header('cache-control', 'no-store').send({
-      access_token: accessToken,
-      token_type: 'Bearer',
-      expires_in: ACCESS_TOKEN_TTL_SECONDS,
-      scope: MCP_SCOPE,
-    });
+    await this.issueTokenPair(reply, record);
   }
 
   async verifyBearer(header: string | undefined): Promise<McpAccessToken | null> {
@@ -346,7 +409,7 @@ export async function registerMcpOAuthRoutes(app: FastifyInstance, oauth: McpOAu
     token_endpoint: `${oauth.issuer}/oauth/token`,
     registration_endpoint: `${oauth.issuer}/oauth/register`,
     response_types_supported: ['code'],
-    grant_types_supported: ['authorization_code'],
+    grant_types_supported: ['authorization_code', 'refresh_token'],
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: ['none'],
     scopes_supported: [MCP_SCOPE],
