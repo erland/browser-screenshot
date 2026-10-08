@@ -167,13 +167,15 @@ export function createDatabaseOAuthStore(db: Pick<Database, 'query'>): OAuthStor
     async saveRefreshToken(hash, record, expiresAt) {
       await db.query(
         `INSERT INTO oauth_refresh_token (token_hash, client_id, email, scope, resource, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+         VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (token_hash) DO NOTHING`,
         [hash, record.clientId, record.email, record.scope, record.resource, expiresAt]
       );
     },
     async consumeRefreshToken(hash, clientId) {
       const result = await db.query<{ client_id: string; email: string; scope: string; resource: string }>(
-        `DELETE FROM oauth_refresh_token WHERE token_hash = $1 AND client_id = $2 AND expires_at > now()
+        `UPDATE oauth_refresh_token SET rotated_at = COALESCE(rotated_at, now())
+         WHERE token_hash = $1 AND client_id = $2 AND expires_at > now()
+         AND (rotated_at IS NULL OR rotated_at >= now() - interval '30 seconds')
          RETURNING client_id, email, scope, resource`, [hash, clientId]
       );
       const row = result.rows[0];
@@ -307,12 +309,14 @@ export class McpOAuthManager {
     reply.header('cache-control', 'no-store').redirect(callback.toString());
   }
 
-  private async issueTokenPair(reply: FastifyReply, record: OAuthRefreshRecord): Promise<void> {
+  private async issueTokenPair(reply: FastifyReply, record: OAuthRefreshRecord, predecessor?: string): Promise<void> {
     const exp = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL_SECONDS;
     const accessToken = signToken({
       email: record.email, clientId: record.clientId, scopes: [MCP_SCOPE], resource: record.resource, exp
     }, this.config.tokenSecret);
-    const refreshToken = randomBytes(48).toString('base64url');
+    const refreshToken = predecessor
+      ? createHmac('sha256', this.config.tokenSecret).update('oauth-refresh-successor-v1:').update(predecessor).digest('base64url')
+      : randomBytes(48).toString('base64url');
     await this.store.saveRefreshToken(codeHash(refreshToken), record, new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 86400_000));
     reply.header('cache-control', 'no-store').header('pragma', 'no-cache').send({
       access_token: accessToken, token_type: 'Bearer',
@@ -350,8 +354,8 @@ export class McpOAuthManager {
           sendOAuthError(reply, 403, 'access_denied', 'This email address is no longer allowed.');
           return;
         }
-        await this.issueTokenPair(reply, record);
-        diagnostic('success', 'rotated');
+        await this.issueTokenPair(reply, record, body.refresh_token);
+        diagnostic('success', 'rotated_or_retried');
       } catch (error) {
         diagnostic('error', 'internal_error');
         throw error;
