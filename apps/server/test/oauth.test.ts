@@ -5,6 +5,7 @@ import { McpOAuthManager, pkceS256, registerMcpOAuthRoutes, type OAuthCodeRecord
 function createStore() {
   const clients = new Map<string, { clientId: string; redirectUris: string[]; clientName?: string | null }>();
   const codes = new Map<string, OAuthCodeRecord>();
+  const refresh = new Map<string, { record: { clientId: string; email: string; scope: string; resource: string }; expiresAt: Date }>();
   let allowed = true;
   let seq = 0;
   const store: OAuthStore & { setAllowed(value: boolean): void } = {
@@ -26,6 +27,8 @@ function createStore() {
       return found;
     },
     async isAllowed() { return allowed; },
+    async saveRefreshToken(hash, record, expiresAt) { refresh.set(hash, { record, expiresAt }); },
+    async consumeRefreshToken(hash) { const entry = refresh.get(hash); refresh.delete(hash); return entry && entry.expiresAt > new Date() ? entry.record : null; },
   };
   return store;
 }
@@ -82,6 +85,7 @@ describe('MCP OAuth', () => {
     });
     expect(token.statusCode).toBe(200);
     const accessToken = token.json().access_token as string;
+    expect(token.json().refresh_token).toBeTruthy();
     expect((await oauth.verifyBearer(`Bearer ${accessToken}`))?.email).toBe('allowed@example.test');
 
     store.setAllowed(false);
@@ -138,6 +142,34 @@ describe('MCP OAuth input hardening', () => {
     });
     expect(response.statusCode).toBe(400);
     expect(response.json().error).toBe('invalid_request');
+    await app.close();
+  });
+});
+
+describe('MCP OAuth refresh tokens', () => {
+  it('rotates refresh credentials and rejects replay', async () => {
+    const store = createStore();
+    const oauth = new McpOAuthManager(config, store, { getSessionUser: async () => null } as never);
+    const app = Fastify();
+    await registerMcpOAuthRoutes(app, oauth);
+    const secret = 'test-refresh-value';
+    const { createHash } = await import('node:crypto');
+    await store.saveRefreshToken(createHash('sha256').update(secret).digest('hex'), {
+      clientId: 'client-1', email: 'allowed@example.test', scope: 'mcp',
+      resource: 'https://screenshots.example.test/mcp'
+    }, new Date(Date.now() + 86400_000));
+    const refresh = () => app.inject({
+      method: 'POST', url: '/oauth/token',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: secret, client_id: 'client-1' }).toString()
+    });
+    const first = await refresh();
+    expect(first.statusCode).toBe(200);
+    expect(first.json().refresh_token).toBeTruthy();
+    expect(first.json().expires_in).toBe(3600);
+    const replay = await refresh();
+    expect(replay.statusCode).toBe(400);
+    expect(replay.json().error).toBe('invalid_grant');
     await app.close();
   });
 });
