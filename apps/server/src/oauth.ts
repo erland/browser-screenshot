@@ -47,7 +47,7 @@ export interface OAuthStore {
   consumeAuthorizationCode(code: string): Promise<OAuthCodeRecord | null>;
   isAllowed(email: string): Promise<boolean>;
   saveRefreshToken(hash: string, record: OAuthRefreshRecord, expiresAt: Date): Promise<void>;
-  consumeRefreshToken(hash: string): Promise<OAuthRefreshRecord | null>;
+  consumeRefreshToken(hash: string, clientId: string): Promise<OAuthRefreshRecord | null>;
 }
 
 function normalizeOrigin(value: string): string {
@@ -171,10 +171,10 @@ export function createDatabaseOAuthStore(db: Pick<Database, 'query'>): OAuthStor
         [hash, record.clientId, record.email, record.scope, record.resource, expiresAt]
       );
     },
-    async consumeRefreshToken(hash) {
+    async consumeRefreshToken(hash, clientId) {
       const result = await db.query<{ client_id: string; email: string; scope: string; resource: string }>(
-        `DELETE FROM oauth_refresh_token WHERE token_hash = $1 AND expires_at > now()
-         RETURNING client_id, email, scope, resource`, [hash]
+        `DELETE FROM oauth_refresh_token WHERE token_hash = $1 AND client_id = $2 AND expires_at > now()
+         RETURNING client_id, email, scope, resource`, [hash, clientId]
       );
       const row = result.rows[0];
       return row ? { clientId: row.client_id, email: row.email, scope: row.scope, resource: row.resource } : null;
@@ -334,7 +334,7 @@ export class McpOAuthManager {
         return;
       }
       try {
-        const record = await this.store.consumeRefreshToken(codeHash(body.refresh_token));
+        const record = await this.store.consumeRefreshToken(codeHash(body.refresh_token), body.client_id);
         if (!record || record.clientId !== body.client_id) {
           diagnostic('rejected', 'invalid_grant');
           sendOAuthError(reply, 400, 'invalid_grant', 'Refresh token is invalid or expired.');
