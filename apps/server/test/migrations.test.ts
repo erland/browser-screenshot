@@ -26,6 +26,7 @@ describe('database migrations', () => {
       { version: '002_email_allowlist' },
       { version: '003_mcp_oauth' },
       { version: '004_mcp_refresh_token' },
+      { version: '005_mcp_refresh_retry' },
     ]);
     await pool.end();
   });
