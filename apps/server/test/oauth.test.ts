@@ -170,6 +170,13 @@ describe('MCP OAuth refresh tokens', () => {
     const concurrent = await Promise.all([refresh(), refresh()]);
     expect(concurrent.map(r => r.statusCode)).toEqual([200, 200]);
     expect(new Set(concurrent.map(r => r.json().refresh_token)).size).toBe(1);
+    const wrongClient = await app.inject({
+      method: 'POST', url: '/oauth/token',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: secret, client_id: 'other-client' }).toString()
+    });
+    expect(wrongClient.statusCode).toBe(400);
+    expect(wrongClient.json().error).toBe('invalid_grant');
     const replay = await refresh();
     expect(replay.statusCode).toBe(200);
     expect(replay.json().refresh_token).toBe(first.json().refresh_token);
