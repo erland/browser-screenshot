@@ -1,0 +1,32 @@
+# Google sign-in rollout (incremental)
+
+Status: design and data migration only; **not yet ready to merge/release**.
+
+## Goal
+Extend existing browser GitHub sign-in with optional Google OpenID Connect while preserving GitHub authentication, allowlist, MCP authorization-code + PKCE, signed web cookies and screenshot security boundaries. Match the user-facing account management pattern from erland/pwa-preview PRs #40-#43.
+
+## Existing constraints
+- Current `app_user` is GitHub-specific, and signed session claims contain `githubUserId` and `githubLogin`.
+- `allowed_user` is email-based; its synchronization is currently authoritative from `BROWSER_SCREENSHOT_GITHUB_ALLOWLIST_EMAILS`.
+- MCP authorizations rely on the session authentication path, and must continue to work for GitHub-only deployments.
+- Browser Screenshot does not store screenshots or previews, so account merge should not create publication migrations.
+
+## Compatibility-first sequence
+1. Add `app_user_identity` and backfill GitHub identities without changing existing user IDs or existing sessions (migration 006).
+2. Add optional Google OIDC sign-in: authorization-code + PKCE and state, validate Google issuer/audience/nonce/expiry and verified email on the server. Use immutable `sub` rather than email as identity. Never link on matching email.
+3. Evolve signed browser sessions to stable `app_user.id` while accepting existing GitHub sessions during their eight-hour TTL. Revalidate the active provider-specific allowlist on protected requests, including MCP login.
+4. Make Google allowlist configuration independent, with `BROWSER_SCREENSHOT_GOOGLE_ALLOWLIST_EMAILS`. Do not reuse current GitHub allowlist synchronization for both providers; preserve database-managed allowlist semantics and fail closed on missing Google allowlist.
+5. Support explicit authenticated identity linking/unlinking via same-origin, CSRF-protected mutations, with database locking and protection of the last identity.
+6. If linking discovers another account, require fresh authentication and explicit merge confirmation; implement atomic migration of linked identities while invalidating old sessions. Reject accidental automatic merges.
+7. Render Google sign-in only when configured, and show linked provider identities. Keep sign-in and screenshot UI responsive.
+8. Forward optional Google variables in *both* Compose files. Document Google Cloud redirect `https://browser-screenshot.apphome.one/auth/callback/google` and rollout/rollback.
+9. Cover auth state replay/mismatch, callback errors, token claims, disabled/unlisted identities, link/unlink/merge concurrency, GitHub-only upgrade, REST and MCP regressions. Run npm verification and production-container smoke before release.
+
+## Rollback
+Do not drop the new table on rollback; retain legacy GitHub columns and routes until final switchover. If Google variables are absent, GitHub-only operation must remain unchanged.
+
+## Reference
+- PWA Preview PR #40 Google OIDC and linking
+- PWA Preview PR #41 Compose passthrough
+- PWA Preview PR #42 account linking and unlinking
+- PWA Preview PR #43 explicit account merge
