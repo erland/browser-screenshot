@@ -40,7 +40,7 @@ export async function verifyGoogleIdToken(
       typeof claims.iat !== 'number' || claims.iat > now + 60 ||
       claims.nonce !== expectedNonce ||
       claims.email_verified !== true || typeof claims.email !== 'string' ||
-      !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(claims.email)) {
+      !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(claims.email)) {
     throw new Error('Google ID token claims validation failed');
   }
   const response = await fetcher(JWKS_ENDPOINT, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(5000) });
