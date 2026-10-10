@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
-import { isActiveGoogleIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, upsertGithubUser, upsertGoogleUser } from './database.js';
+import { isActiveGoogleIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, upsertGithubUser, upsertGoogleUser } from './database.js';
 
 import { exchangeGoogleCode, googlePkceChallenge, verifyGoogleIdToken } from './google-oidc.js';
 
@@ -48,6 +48,7 @@ export type AuthStore = {
   linkGoogle?(githubSubject: string, googleSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
   unlinkGoogle?(githubSubject: string): Promise<'unlinked' | 'not_linked'>;
   assessLink?(githubSubject: string, googleSubject: string): Promise<'already_linked' | 'merge_required' | 'source_not_found' | 'target_not_found'>;
+  mergeGoogle?(githubSubject: string, googleSubject: string): Promise<'merged' | 'already_linked' | 'not_mergeable'>;
 };
 
 export type AuthConfig = {
@@ -189,6 +190,7 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'>): Auth
     listIdentities: (provider, subject) => listLinkedProviderIdentities(database, provider, subject),
     linkGoogle: (githubSubject, googleSubject, email) => linkUnclaimedGoogleIdentity(database, githubSubject, googleSubject, email),
     unlinkGoogle: (githubSubject) => unlinkGoogleFromGithubAccount(database, githubSubject),
+    mergeGoogle: (githubSubject, googleSubject) => mergeVerifiedGoogleAccount(database, githubSubject, googleSubject),
     assessLink: async (githubSubject, googleSubject) => (await assessIdentityLink(database,
       { provider: 'github', subject: githubSubject }, { provider: 'google', subject: googleSubject })).outcome,
   };
@@ -387,10 +389,15 @@ export class AuthManager {
     }
     const mergeRequested = (request.body as { merge?: unknown } | undefined)?.merge === true;
     if (mergeRequested) {
-      // No account merge is performed until the transaction and grant revocation
-      // have been implemented and independently verified against PostgreSQL.
-      reply.code(409).send({ error: { code: 'MERGE_NOT_READY',
-        message: 'Account merging is not enabled yet; no accounts were changed.' } });
+      if (!this.store.mergeGoogle) {
+        reply.code(503).send({ error: { code: 'MERGE_UNAVAILABLE' } }); return;
+      }
+      const merged = await this.store.mergeGoogle(user.githubUserId, pending.googleSubject);
+      if (merged === 'merged' || merged === 'already_linked') {
+        reply.send({ status: merged }); return;
+      }
+      reply.code(409).send({ error: { code: 'MERGE_NOT_ALLOWED',
+        message: 'These accounts cannot be merged safely.' } });
       return;
     }
     if (!this.store.linkGoogle) {
