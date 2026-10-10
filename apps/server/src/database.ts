@@ -159,6 +159,20 @@ export async function upsertGithubUser(
   db: Pick<Database, 'query'>,
   input: { providerSubject: string; githubLogin: string; email?: string | null }
 ): Promise<{ id: string }> {
+  // An already-linked GitHub subject belongs to its existing internal account,
+  // regardless of which provider originally created that account.
+  const linked = await db.query<{ user_id: string }>(
+    `UPDATE app_user_identity SET verified_email = $2, updated_at = now()
+     WHERE provider = 'github' AND provider_subject = $1 RETURNING user_id`,
+    [input.providerSubject, input.email?.toLowerCase() ?? null]
+  );
+  if (linked.rows[0]) {
+    await db.query(
+      'UPDATE app_user SET github_login = $2, updated_at = now() WHERE id = $1',
+      [linked.rows[0].user_id, input.githubLogin]
+    );
+    return { id: linked.rows[0].user_id };
+  }
   const id = randomUUID();
   const result = await db.query<{ id: string }>(
     `INSERT INTO app_user (id, provider, provider_subject, github_login, email)
@@ -217,6 +231,17 @@ export async function upsertGoogleUser(
      DO UPDATE SET verified_email = EXCLUDED.verified_email, updated_at = now()`,
     [subject, email]
   );
+}
+
+export async function isActiveGithubIdentity(
+  db: Pick<Database, 'query'>, subject: string, email: string
+): Promise<boolean> {
+  const result = await db.query(
+    `SELECT 1 FROM app_user_identity
+     WHERE provider = 'github' AND provider_subject = $1 AND lower(verified_email) = $2`,
+    [subject, email.toLowerCase()]
+  );
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function isActiveGoogleIdentity(
@@ -473,5 +498,67 @@ export async function mergeVerifiedGithubAccount(
     await client.query('DELETE FROM app_user WHERE id = $1 AND provider = $2 AND provider_subject = $3',
       [removed.id, 'github', githubSubject]);
     return 'merged';
+  });
+}
+
+/**
+ * An account is identified by its stable app_user.id, never by its login provider.
+ * Detach one verified login identity while retaining the account and at least
+ * one other login method. Lock the account to serialize concurrent removals.
+ */
+export async function unlinkAccountIdentity(
+  db: Pick<Database, 'transaction'>,
+  authenticated: { provider: 'github' | 'google'; subject: string },
+  removeProvider: 'github' | 'google'
+): Promise<'unlinked' | 'not_linked' | 'last_identity'> {
+  return db.transaction(async client => {
+    const owner = await client.query<{ user_id: string }>(
+      `SELECT user_id FROM app_user_identity
+       WHERE provider = $1 AND provider_subject = $2`,
+      [authenticated.provider, authenticated.subject]
+    );
+    if (!owner.rows[0]) return 'not_linked';
+    const userId = owner.rows[0].user_id;
+    await client.query('SELECT id FROM app_user WHERE id = $1 FOR UPDATE', [userId]);
+    const identities = await client.query<{ provider: string; provider_subject: string }>(
+      'SELECT provider, provider_subject FROM app_user_identity WHERE user_id = $1 FOR UPDATE',
+      [userId]
+    );
+    const target = identities.rows.find(identity => identity.provider === removeProvider);
+    if (!target) return 'not_linked';
+    if (identities.rows.length <= 1) return 'last_identity';
+    // A session authenticated with the identity being removed must not
+    // remain active after removal. Require sign-in via the retained provider.
+    if (authenticated.provider === removeProvider) return 'last_identity';
+    // The legacy owner columns remain for compatibility with existing login
+    // upserts. Repoint them to a retained verified identity before detaching
+    // the original owner; app_user.id is never changed.
+    const legacy = await client.query<{ provider: string; provider_subject: string }>(
+      'SELECT provider, provider_subject FROM app_user WHERE id = $1', [userId]);
+    if (legacy.rows[0]?.provider === removeProvider) {
+      const retained = identities.rows.find(identity => identity.provider !== removeProvider);
+      if (!retained) return 'last_identity';
+      await client.query(
+        `UPDATE app_user SET provider = $2, provider_subject = $3,
+           github_login = CASE WHEN $2 = 'github' THEN github_login ELSE NULL END,
+           updated_at = now() WHERE id = $1`,
+        [userId, retained.provider, retained.provider_subject]
+      );
+    }
+    // Revoke legacy account-scoped MCP tokens as well as provider-bound grants.
+    await client.query('UPDATE app_user SET mcp_tokens_invalid_before = clock_timestamp() WHERE id = $1', [userId]);
+    await client.query(
+      'DELETE FROM oauth_authorization_code WHERE user_id = $1 AND identity_provider = $2 AND identity_subject = $3',
+      [userId, removeProvider, target.provider_subject]
+    );
+    await client.query(
+      'DELETE FROM oauth_refresh_token WHERE user_id = $1 AND identity_provider = $2 AND identity_subject = $3',
+      [userId, removeProvider, target.provider_subject]
+    );
+    await client.query(
+      'DELETE FROM app_user_identity WHERE user_id = $1 AND provider = $2 AND provider_subject = $3',
+      [userId, removeProvider, target.provider_subject]
+    );
+    return 'unlinked';
   });
 }
