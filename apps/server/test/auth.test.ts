@@ -203,3 +203,35 @@ describe('Optional Google login routing', () => {
     await app.close();
   });
 });
+
+
+describe('Linked account identities endpoint', () => {
+  it('requires a valid browser session', async () => {
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(config, createStore(), createGithub()) });
+    const response = await app.inject('/api/account/identities');
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('returns only identities resolved from the signed-in immutable provider subject', async () => {
+    const store = createStore();
+    store.listIdentities = vi.fn(async () => [
+      { provider: 'github' as const, email: 'allowed.user@example.test' },
+      { provider: 'google' as const, email: 'other@example.test' }
+    ]);
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(config, store, createGithub()) });
+    const session = await login(app);
+    const response = await app.inject({
+      method: 'GET', url: '/api/account/identities',
+      headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}` }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json().identities).toEqual([
+      { provider: 'github', email: 'allowed.user@example.test' },
+      { provider: 'google', email: 'other@example.test' }
+    ]);
+    expect(store.listIdentities).toHaveBeenCalledWith('github', '12345');
+    await app.close();
+  });
+});
