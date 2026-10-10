@@ -131,7 +131,7 @@ describe('database helpers', () => {
 
 describe('Linked identity isolation', () => {
   it('fetches linked providers by immutable signed-in subject, never email alone', async () => {
-    const query = vi.fn(async () => ({ rows: [{
+    const query = vi.fn(async (_sql: string, _values?: unknown[]) => ({ rows: [{
       provider: 'github', provider_subject: 'subject-1', verified_email: 'one@example.test'
     }], rowCount: 1 }));
     const identities = await listLinkedProviderIdentities({ query } as never, 'github', 'subject-1');
