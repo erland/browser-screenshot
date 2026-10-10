@@ -23,7 +23,12 @@ function isSensitivePath(url: string): boolean {
 
 export function registerSecurityHooks(app: FastifyInstance, options: { hsts?: boolean } = {}): void {
   app.addHook('onSend', async (request, reply, payload) => {
-    for (const [name, value] of Object.entries(SECURITY_HEADERS)) reply.header(name, value);
+    // Route-specific security policies (such as the standalone OAuth confirmation
+    // page) must not be overwritten by the default CSP. All other security
+    // headers retain their strict defaults.
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      if (!reply.hasHeader(name)) reply.header(name, value);
+    }
     if (options.hsts) reply.header('strict-transport-security', 'max-age=31536000');
     if (isSensitivePath(request.url) && !reply.hasHeader('cache-control')) {
       reply.header('cache-control', 'no-store');
