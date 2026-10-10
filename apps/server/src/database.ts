@@ -80,6 +80,7 @@ export async function runMigrations(client: Pick<pg.Pool, 'query'>): Promise<voi
     ['003_mcp_oauth', resolve(currentDir, '../migrations/003_mcp_oauth.sql')],
     ['004_mcp_refresh_token', resolve(currentDir, '../migrations/004_mcp_refresh_token.sql')],
     ['005_mcp_refresh_retry', resolve(currentDir, '../migrations/005_mcp_refresh_retry.sql')],
+    ['006_external_identities', resolve(currentDir, '../migrations/006_external_identities.sql')],
   ] as const;
 
   await client.query('BEGIN');
