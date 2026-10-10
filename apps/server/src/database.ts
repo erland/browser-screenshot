@@ -82,6 +82,7 @@ export async function runMigrations(client: Pick<pg.Pool, 'query'>): Promise<voi
     ['005_mcp_refresh_retry', resolve(currentDir, '../migrations/005_mcp_refresh_retry.sql')],
     ['006_external_identities', resolve(currentDir, '../migrations/006_external_identities.sql')],
     ['007_google_accounts', resolve(currentDir, '../migrations/007_google_accounts.sql')],
+    ['008_mcp_provider_identity', resolve(currentDir, '../migrations/008_mcp_provider_identity.sql')],
   ] as const;
 
   await client.query('BEGIN');
