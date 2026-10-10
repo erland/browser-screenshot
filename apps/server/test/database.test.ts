@@ -5,6 +5,7 @@ import {
   databaseConnectionString,
   isEmailAllowed,
   listLinkedProviderIdentities,
+  linkUnclaimedGoogleIdentity,
   syncConfiguredAllowlist,
   upsertGithubUser,
 } from '../src/database.js';
@@ -176,5 +177,34 @@ describe('Safe account link assessment', () => {
       return { rows: [{ provider: 'github', provider_subject: 'github-123', user_id: 'account-a' }], rowCount: 1 };
     });
     expect(await assessIdentityLink({ query } as never, source, target)).toEqual({ outcome: 'target_not_found' });
+  });
+});
+
+describe('Atomic account linking', () => {
+  it('links only an unclaimed Google subject to the verified GitHub account', async () => {
+    const query = vi.fn(async (...args: unknown[]) => {
+      void args;
+      return { rows: [{ user_id: 'account-1' }], rowCount: 1 };
+    });
+    expect(await linkUnclaimedGoogleIdentity({ query } as never,
+      'github-subject', 'google-subject', 'USER@EXAMPLE.TEST')).toBe('linked');
+    expect(query.mock.calls[0][0]).toContain('ON CONFLICT DO NOTHING');
+    expect(query.mock.calls[0][0]).toContain("source.provider = 'github'");
+    expect(query.mock.calls[0][1]).toEqual(['github-subject', 'google-subject', 'user@example.test']);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not take over a Google identity already owned by a different account', async () => {
+    const query = vi.fn(async (...args: unknown[]) => {
+      const statement = String(args[0]);
+      if (statement.includes('INSERT INTO app_user_identity')) return { rows: [], rowCount: 0 };
+      return { rows: [
+        { provider: 'github', provider_subject: 'github-subject', user_id: 'account-a' },
+        { provider: 'google', provider_subject: 'google-subject', user_id: 'account-b' },
+      ], rowCount: 2 };
+    });
+    expect(await linkUnclaimedGoogleIdentity({ query } as never,
+      'github-subject', 'google-subject', 'user@example.test')).toBe('merge_required');
+    expect(query).toHaveBeenCalledTimes(2);
   });
 });
