@@ -161,3 +161,148 @@ describe('GitHub OAuth and allowlist', () => {
     await app.close();
   });
 });
+
+
+describe('Optional Google login routing', () => {
+  const googleConfig = {
+    ...config,
+    googleClientId: 'google-client-id',
+    googleClientSecret: 'google-client-secret',
+    googleAllowedEmails: ['allowed.user@example.test'],
+  };
+
+  it('does not expose Google when disabled', async () => {
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(config, createStore(), createGithub()) });
+    expect((await app.inject('/api/auth/providers')).json()).toEqual({ github: true, google: false });
+    expect((await app.inject('/auth/login/google')).statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('starts Google login with authorization code, PKCE, nonce and secure state cookie', async () => {
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(googleConfig, createStore(), createGithub()) });
+    expect((await app.inject('/api/auth/providers')).json()).toEqual({ github: true, google: true });
+    const start = await app.inject('/auth/login/google');
+    expect(start.statusCode).toBe(302);
+    const url = new URL(start.headers.location!);
+    expect(url.origin).toBe('https://accounts.google.com');
+    expect(url.searchParams.get('redirect_uri')).toBe('https://screenshots.example.test/auth/callback/google');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(url.searchParams.get('nonce')).toBeTruthy();
+    expect(url.searchParams.get('state')).toBeTruthy();
+    expect(start.headers['set-cookie']).toContain('Secure');
+    expect(start.headers['set-cookie']).toContain('HttpOnly');
+    await app.close();
+  });
+
+  it('rejects invalid Google callback state without exchanging code', async () => {
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(googleConfig, createStore(), createGithub()) });
+    const response = await app.inject('/auth/callback/google?code=test&state=forged');
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('INVALID_OAUTH_STATE');
+    await app.close();
+  });
+});
+
+
+describe('Linked account identities endpoint', () => {
+  it('requires a valid browser session', async () => {
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(config, createStore(), createGithub()) });
+    const response = await app.inject('/api/account/identities');
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('returns only identities resolved from the signed-in immutable provider subject', async () => {
+    const store = createStore();
+    store.listIdentities = vi.fn(async () => [
+      { provider: 'github' as const, email: 'allowed.user@example.test' },
+      { provider: 'google' as const, email: 'other@example.test' }
+    ]);
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(config, store, createGithub()) });
+    const session = await login(app);
+    const response = await app.inject({
+      method: 'GET', url: '/api/account/identities',
+      headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}` }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json().identities).toEqual([
+      { provider: 'github', email: 'allowed.user@example.test' },
+      { provider: 'google', email: 'other@example.test' }
+    ]);
+    expect(store.listIdentities).toHaveBeenCalledWith('github', '12345');
+    await app.close();
+  });
+});
+
+
+describe('Google link verification initiation', () => {
+  it('requires an existing authenticated GitHub session', async () => {
+    const auth = new AuthManager({
+      ...config, googleClientId: 'google-id', googleClientSecret: 'google-secret',
+      googleAllowedEmails: ['allowed.user@example.test']
+    }, createStore(), createGithub());
+    const app = await buildApp({ serveFrontend: false, auth });
+    const anonymous = await app.inject('/auth/link/google');
+    expect(anonymous.statusCode).toBe(401);
+    const session = await login(app);
+    const start = await app.inject({ url: '/auth/link/google', method: 'GET',
+      headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}` } });
+    expect(start.statusCode).toBe(302);
+    const url = new URL(start.headers.location!);
+    expect(url.hostname).toBe('accounts.google.com');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(start.headers['set-cookie']).toContain('browser_screenshot_google_state');
+    await app.close();
+  });
+});
+
+
+describe('Explicit Google account link confirmation', () => {
+  it('rejects anonymous or cross-origin confirmation and never changes accounts', async () => {
+    const store = createStore();
+    store.linkGoogle = vi.fn(async () => 'linked' as const);
+    const auth = new AuthManager(config, store, createGithub());
+    const app = await buildApp({ serveFrontend: false, auth });
+    const anonymous = await app.inject({ method: 'POST', url: '/api/account/link/google/confirm',
+      headers: { origin: config.publicBaseUrl } });
+    expect(anonymous.statusCode).toBe(401);
+    const session = await login(app);
+    const crossOrigin = await app.inject({ method: 'POST', url: '/api/account/link/google/confirm',
+      headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}`,
+        origin: 'https://evil.example.test' } });
+    expect(crossOrigin.statusCode).toBe(403);
+    const missingConfirmation = await app.inject({ method: 'POST', url: '/api/account/link/google/confirm',
+      headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}`,
+        origin: config.publicBaseUrl } });
+    expect(missingConfirmation.statusCode).toBe(403);
+    expect(store.linkGoogle).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+
+describe('Google unlinking protections', () => {
+  it('requires authenticated GitHub session and a same-origin request', async () => {
+    const store = createStore();
+    store.unlinkGoogle = vi.fn(async () => 'unlinked' as const);
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(config, store, createGithub()) });
+    const anonymous = await app.inject({ method: 'POST', url: '/api/account/unlink/google',
+      headers: { origin: config.publicBaseUrl } });
+    expect(anonymous.statusCode).toBe(401);
+    const session = await login(app);
+    const denied = await app.inject({ method: 'POST', url: '/api/account/unlink/google',
+      headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}`,
+        origin: 'https://untrusted.example.test' } });
+    expect(denied.statusCode).toBe(403);
+    expect(store.unlinkGoogle).not.toHaveBeenCalled();
+    const allowed = await app.inject({ method: 'POST', url: '/api/account/unlink/google',
+      headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}`,
+        origin: config.publicBaseUrl } });
+    expect(allowed.statusCode).toBe(200);
+    expect(allowed.json().status).toBe('unlinked');
+    expect(store.unlinkGoogle).toHaveBeenCalledWith('12345');
+    await app.close();
+  });
+});

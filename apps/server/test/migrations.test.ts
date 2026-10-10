@@ -17,7 +17,7 @@ describe('database migrations', () => {
        ORDER BY table_name`
     );
     expect(tables.rows.map((row: { table_name: string }) => row.table_name)).toEqual(
-      expect.arrayContaining(['allowed_user', 'app_user', 'oauth_client', 'oauth_authorization_code', 'oauth_refresh_token', 'schema_migration'])
+      expect.arrayContaining(['allowed_user', 'app_user', 'oauth_client', 'oauth_authorization_code', 'oauth_refresh_token', 'app_user_identity', 'schema_migration'])
     );
 
     const versions = await pool.query('SELECT version FROM schema_migration');
@@ -27,6 +27,10 @@ describe('database migrations', () => {
       { version: '003_mcp_oauth' },
       { version: '004_mcp_refresh_token' },
       { version: '005_mcp_refresh_retry' },
+      { version: '006_external_identities' },
+      { version: '007_google_accounts' },
+      { version: '008_mcp_provider_identity' },
+      { version: '009_mcp_merge_revocation' },
     ]);
     await pool.end();
   });
