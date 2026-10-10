@@ -258,3 +258,36 @@ export async function assessIdentityLink(
   if (!targetAccount) return { outcome: 'target_not_found' };
   return { outcome: sourceAccount.user_id === targetAccount.user_id ? 'already_linked' : 'merge_required' };
 }
+
+/**
+ * Atomic link of a newly verified Google subject to an existing GitHub account.
+ * Existing Google identities are never reassigned, even when emails match.
+ * Must only be called after fresh Google OIDC and explicit user confirmation.
+ */
+export async function linkUnclaimedGoogleIdentity(
+  db: Pick<Database, 'query'>,
+  githubSubject: string,
+  googleSubject: string,
+  verifiedGoogleEmail: string
+): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'> {
+  const inserted = await db.query<{ user_id: string }>(
+    `INSERT INTO app_user_identity (user_id, provider, provider_subject, verified_email)
+     SELECT source.user_id, 'google', $2, $3
+     FROM app_user_identity source
+     WHERE source.provider = 'github' AND source.provider_subject = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM app_user_identity existing
+         WHERE existing.user_id = source.user_id AND existing.provider = 'google'
+       )
+     ON CONFLICT DO NOTHING
+     RETURNING user_id`,
+    [githubSubject, googleSubject, verifiedGoogleEmail.toLowerCase()]
+  );
+  if ((inserted.rowCount ?? 0) > 0) return 'linked';
+  const assessment = await assessIdentityLink(db,
+    { provider: 'github', subject: githubSubject },
+    { provider: 'google', subject: googleSubject });
+  if (assessment.outcome === 'already_linked') return 'already_linked';
+  if (assessment.outcome === 'source_not_found') return 'source_not_found';
+  return 'merge_required';
+}
