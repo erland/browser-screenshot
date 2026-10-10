@@ -412,3 +412,66 @@ export async function mergeVerifiedGoogleAccount(
     return 'merged';
   });
 }
+
+/** Attach a verified GitHub identity to an existing Google account only if unclaimed. */
+export async function linkUnclaimedGithubIdentity(
+  db: Pick<Database, 'query'>, googleSubject: string, githubSubject: string, email: string
+): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'> {
+  const inserted = await db.query(
+    `INSERT INTO app_user_identity (user_id, provider, provider_subject, verified_email)
+     SELECT source.user_id, 'github', $2, $3 FROM app_user_identity source
+     WHERE source.provider = 'google' AND source.provider_subject = $1
+       AND NOT EXISTS (SELECT 1 FROM app_user_identity existing
+         WHERE existing.user_id = source.user_id AND existing.provider = 'github')
+     ON CONFLICT DO NOTHING RETURNING user_id`,
+    [googleSubject, githubSubject, email.toLowerCase()]);
+  if ((inserted.rowCount ?? 0) > 0) return 'linked';
+  const assessment = await assessIdentityLink(db,
+    { provider: 'google', subject: googleSubject }, { provider: 'github', subject: githubSubject });
+  return assessment.outcome === 'already_linked' ? 'already_linked' :
+    assessment.outcome === 'source_not_found' ? 'source_not_found' : 'merge_required';
+}
+
+/** Retain the authenticated Google account and move only a standalone GitHub identity. */
+export async function mergeVerifiedGithubAccount(
+  db: Pick<Database, 'transaction'>, googleSubject: string, githubSubject: string
+): Promise<'merged' | 'already_linked' | 'not_mergeable'> {
+  return db.transaction(async client => {
+    const owners = await client.query<{ id: string; provider: string; provider_subject: string }>(
+      `SELECT u.id, u.provider, u.provider_subject FROM app_user u
+       JOIN app_user_identity i ON i.user_id = u.id
+       WHERE (i.provider = 'google' AND i.provider_subject = $1)
+          OR (i.provider = 'github' AND i.provider_subject = $2)
+       ORDER BY u.id FOR UPDATE OF u`, [googleSubject, githubSubject]);
+    const identities = await client.query<{ user_id: string; provider: string; provider_subject: string }>(
+      `SELECT user_id, provider, provider_subject FROM app_user_identity
+       WHERE (provider = 'google' AND provider_subject = $1)
+          OR (provider = 'github' AND provider_subject = $2) FOR UPDATE`,
+      [googleSubject, githubSubject]);
+    const google = identities.rows.find(x => x.provider === 'google' && x.provider_subject === googleSubject);
+    const github = identities.rows.find(x => x.provider === 'github' && x.provider_subject === githubSubject);
+    if (!google || !github) return 'not_mergeable';
+    if (google.user_id === github.user_id) return 'already_linked';
+    const retained = owners.rows.find(x => x.id === google.user_id &&
+      x.provider === 'google' && x.provider_subject === googleSubject);
+    const removed = owners.rows.find(x => x.id === github.user_id &&
+      x.provider === 'github' && x.provider_subject === githubSubject);
+    if (!retained || !removed) return 'not_mergeable';
+    const all = await client.query<{ user_id: string; provider: string; provider_subject: string }>(
+      'SELECT user_id, provider, provider_subject FROM app_user_identity WHERE user_id = ANY($1::uuid[]) FOR UPDATE',
+      [[retained.id, removed.id]]);
+    if (all.rows.length !== 2 ||
+        !all.rows.some(x => x.user_id === retained.id && x.provider === 'google' && x.provider_subject === googleSubject) ||
+        !all.rows.some(x => x.user_id === removed.id && x.provider === 'github' && x.provider_subject === githubSubject)) return 'not_mergeable';
+    await client.query('UPDATE app_user SET mcp_tokens_invalid_before = clock_timestamp() WHERE id = $1', [retained.id]);
+    await client.query('DELETE FROM oauth_authorization_code WHERE user_id = ANY($1::uuid[])', [[retained.id, removed.id]]);
+    await client.query('DELETE FROM oauth_refresh_token WHERE user_id = ANY($1::uuid[])', [[retained.id, removed.id]]);
+    await client.query(
+      `UPDATE app_user_identity SET user_id = $1, updated_at = now()
+       WHERE user_id = $2 AND provider = 'github' AND provider_subject = $3`,
+      [retained.id, removed.id, githubSubject]);
+    await client.query('DELETE FROM app_user WHERE id = $1 AND provider = $2 AND provider_subject = $3',
+      [removed.id, 'github', githubSubject]);
+    return 'merged';
+  });
+}

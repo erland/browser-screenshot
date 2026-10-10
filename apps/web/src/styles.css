@@ -186,3 +186,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .topbar { gap: .6rem; }
   .account-copy span { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* Give stacked login providers clear separation and comfortable touch targets. */
+.auth-card > a.button.full + a.button.full { margin-top: 0.85rem; }
+.auth-card > a.button.full { min-height: 48px; display: flex; align-items: center; justify-content: center; }

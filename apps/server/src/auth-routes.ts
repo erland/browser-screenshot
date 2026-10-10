@@ -10,6 +10,7 @@ export async function registerAuthRoutes(app: FastifyInstance, auth: AuthManager
     const query = request.query as { returnTo?: string };
     auth.googleLogin(reply, query.returnTo);
   });
+  app.get('/auth/link/github', async (request, reply) => auth.startGithubLink(request, reply));
   app.get('/auth/link/google', async (request, reply) => auth.startGoogleLink(request, reply));
   app.get('/auth/link/confirm', async (request, reply) => auth.showGoogleLinkConfirmation(request, reply));
   app.post('/api/account/link/google/confirm', async (request, reply) => auth.confirmGoogleLink(request, reply));
