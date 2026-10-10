@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
-import { isActiveGoogleIdentity, isEmailAllowed, linkUnclaimedGoogleIdentity, listLinkedProviderIdentities, upsertGithubUser, upsertGoogleUser } from './database.js';
+import { isActiveGoogleIdentity, isEmailAllowed, linkUnclaimedGoogleIdentity, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, upsertGithubUser, upsertGoogleUser } from './database.js';
 
 import { exchangeGoogleCode, googlePkceChallenge, verifyGoogleIdToken } from './google-oidc.js';
 
@@ -46,6 +46,7 @@ export type AuthStore = {
   googleIsActive?(subject: string, email: string): Promise<boolean>;
   listIdentities?(provider: 'github' | 'google', subject: string): Promise<{ provider: 'github' | 'google'; email: string | null }[]>;
   linkGoogle?(githubSubject: string, googleSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
+  unlinkGoogle?(githubSubject: string): Promise<'unlinked' | 'not_linked'>;
 };
 
 export type AuthConfig = {
@@ -186,6 +187,7 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'>): Auth
     googleIsActive: (subject, email) => isActiveGoogleIdentity(database, subject, email),
     listIdentities: (provider, subject) => listLinkedProviderIdentities(database, provider, subject),
     linkGoogle: (githubSubject, googleSubject, email) => linkUnclaimedGoogleIdentity(database, githubSubject, googleSubject, email),
+    unlinkGoogle: (githubSubject) => unlinkGoogleFromGithubAccount(database, githubSubject),
   };
 }
 
@@ -413,6 +415,26 @@ export class AuthManager {
       'document.getElementById("status").textContent=r.ok?"Kontot är kopplat.":' +
       '"Koppling kunde inte slutföras. Ett annat konto kan redan äga identiteten."}</script></html>'
     );
+  }
+
+  async unlinkGoogle(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const user = await this.authenticate(request, reply);
+    if (!user) return;
+    if (request.headers.origin !== this.config.publicBaseUrl) {
+      reply.code(403).send({ error: { code: 'INVALID_ORIGIN' } });
+      return;
+    }
+    if (user.provider !== 'github' || !user.githubUserId || !this.store.unlinkGoogle) {
+      reply.code(403).send({ error: { code: 'GITHUB_SESSION_REQUIRED' } });
+      return;
+    }
+    const outcome = await this.store.unlinkGoogle(user.githubUserId);
+    reply.header('cache-control', 'no-store');
+    if (outcome === 'not_linked') {
+      reply.code(404).send({ error: { code: 'GOOGLE_NOT_LINKED' } });
+      return;
+    }
+    reply.send({ status: 'unlinked' });
   }
 
   async getLinkedIdentities(request: FastifyRequest, reply: FastifyReply): Promise<void> {
