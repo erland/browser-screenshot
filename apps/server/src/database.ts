@@ -520,6 +520,8 @@ export async function unlinkAccountIdentity(
         [userId, retained.provider, retained.provider_subject]
       );
     }
+    // Revoke legacy account-scoped MCP tokens as well as provider-bound grants.
+    await client.query('UPDATE app_user SET mcp_tokens_invalid_before = clock_timestamp() WHERE id = $1', [userId]);
     await client.query(
       'DELETE FROM oauth_authorization_code WHERE user_id = $1 AND identity_provider = $2 AND identity_subject = $3',
       [userId, removeProvider, target.provider_subject]
