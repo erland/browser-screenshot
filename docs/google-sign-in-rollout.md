@@ -53,3 +53,8 @@ This additive schema alone does not make Google MCP functional.
 
 ## CI and MCP lookup checkpoint
 The CI workflow now verifies pushes to `main` and pull requests; feature-branch pushes with an open PR no longer produce a second push-triggered run. The MCP store can resolve an immutable `(provider, subject, verified email)` identity to its internal account ID, and GitHub sign-ins maintain the mapping. OAuth grants/tokens are **not yet bound** to that result, so the existing Google MCP denial remains in force. Complete grant/token binding and revocation checks before removing it.
+
+## Google MCP authorization enabled in code (pending final verification)
+The provider-bound Google MCP authorization path is now implemented. An authenticated Google session must resolve to an existing Google identity by immutable subject, verified email and account ID; the resolved identity must pass provider-specific authorization before any grant is issued. The grant, refresh credential and bearer token carry that identity and revalidate it on use. GitHub authorization is unchanged, including its legacy email-only compatibility path.
+
+Earlier sections describing the temporary Google MCP block document historical rollout checkpoints rather than the current implementation. Do not merge until CI and database-backed tests pass, and account linking / merging / revocation behavior is reviewed.
