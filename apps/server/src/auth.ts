@@ -279,8 +279,11 @@ export class AuthManager {
         }
         // Do not silently switch accounts or link based on a matching email.
         // A confirmed, transactional merge is required for an existing GitHub identity.
-        reply.code(409).send({ error: { code: 'GITHUB_LINK_CONFIRMATION_REQUIRED',
-          message: 'GitHub was verified. Account linking requires explicit confirmation; no accounts were changed.' } });
+        const pending = signPayload({ githubSubject: githubUserId, googleSubject: original.googleSubject,
+          email, direction: 'github', exp: Math.floor(Date.now() / 1000) + STATE_TTL_SECONDS },
+          this.config.sessionSecret);
+        reply.headers({ 'set-cookie': [serializeCookie(LINK_PENDING_COOKIE, pending, STATE_TTL_SECONDS),
+          clearCookie(OAUTH_STATE_COOKIE)], 'cache-control': 'no-store' }).redirect('/auth/link/confirm');
         return;
       }
       await this.store.upsert({ providerSubject: githubUserId, githubLogin: profile.login, email });
