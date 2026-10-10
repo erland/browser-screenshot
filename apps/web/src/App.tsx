@@ -3,6 +3,9 @@ import {
   ApiError,
   createScreenshot,
   getCurrentUser,
+  getLinkedIdentities,
+  unlinkGoogle,
+  type LinkedIdentity,
   getScreenshotPresets,
   logout,
   type AuthenticatedUser,
@@ -40,6 +43,8 @@ function errorMessage(error: unknown): string {
 export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' });
   const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [identities, setIdentities] = useState<LinkedIdentity[]>([]);
+  const [unlinkBusy, setUnlinkBusy] = useState(false);
   const [presets, setPresets] = useState<ScreenshotPresetsResponse | null>(null);
   const [form, setForm] = useState<ScreenshotFormState>(DEFAULT_FORM);
   const [busy, setBusy] = useState(false);
@@ -69,6 +74,14 @@ export function App() {
       });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (auth.status !== 'authenticated') return;
+    let active = true;
+    getLinkedIdentities().then(items => { if (active) setIdentities(items); })
+      .catch(() => { if (active) setIdentities([]); });
+    return () => { active = false; };
+  }, [auth.status]);
 
   useEffect(() => {
     if (auth.status !== 'authenticated') return;
@@ -111,6 +124,20 @@ export function App() {
       } else setError(errorMessage(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function disconnectGoogle() {
+    if (!window.confirm('Vill du koppla bort Google från ditt konto? Du kan fortsätta logga in med GitHub.')) return;
+    setUnlinkBusy(true);
+    setError(null);
+    try {
+      await unlinkGoogle();
+      setIdentities(await getLinkedIdentities());
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setUnlinkBusy(false);
     }
   }
 
@@ -175,6 +202,23 @@ export function App() {
         </div>
       </header>
 
+      <section className="panel" aria-label="Inloggningskonton">
+        <div className="panel-heading">
+          <h2>Inloggningskonton</h2>
+          <p>Hantera vilka inloggningssätt som hör till ditt konto.</p>
+        </div>
+        {identities.map(identity => <p key={identity.provider}>
+          <strong>{identity.provider === 'google' ? 'Google' : 'GitHub'}</strong>
+          {identity.email ? ` – ${identity.email}` : ''}
+        </p>)}
+        {auth.user.provider !== 'google' && googleEnabled &&
+          !identities.some(identity => identity.provider === 'google') &&
+          <a className="button secondary" href="/auth/link/google">Koppla Google-konto</a>}
+        {auth.user.provider !== 'google' &&
+          identities.some(identity => identity.provider === 'google') &&
+          <button type="button" className="button secondary" disabled={unlinkBusy}
+            onClick={disconnectGoogle}>{unlinkBusy ? 'Kopplar bort…' : 'Koppla bort Google'}</button>}
+      </section>
       <main className="workspace">
         <section className="panel controls-panel">
           <div className="panel-heading">
