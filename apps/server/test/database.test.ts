@@ -6,6 +6,7 @@ import {
   isEmailAllowed,
   listLinkedProviderIdentities,
   linkUnclaimedGoogleIdentity,
+  unlinkGoogleFromGithubAccount,
   syncConfiguredAllowlist,
   upsertGithubUser,
 } from '../src/database.js';
@@ -206,5 +207,19 @@ describe('Atomic account linking', () => {
     expect(await linkUnclaimedGoogleIdentity({ query } as never,
       'github-subject', 'google-subject', 'user@example.test')).toBe('merge_required');
     expect(query).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Identity unlink safeguards', () => {
+  it('deletes only a Google identity on an account retaining GitHub login', async () => {
+    const query = vi.fn(async (...args: unknown[]) => {
+      void args;
+      return { rows: [], rowCount: 1 };
+    });
+    expect(await unlinkGoogleFromGithubAccount({ query } as never, 'github-123')).toBe('unlinked');
+    expect(query.mock.calls[0][0]).toContain("google.provider = 'google'");
+    expect(query.mock.calls[0][0]).toContain("github.provider = 'github'");
+    expect(query.mock.calls[0][0]).toContain('google.user_id = github.user_id');
+    expect(query.mock.calls[0][1]).toEqual(['github-123']);
   });
 });
