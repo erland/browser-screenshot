@@ -247,3 +247,45 @@ describe('Provider-bound MCP grants', () => {
     await app.close();
   });
 });
+
+
+describe('Google MCP provider-bound authorization', () => {
+  it('allows verified Google identity and revokes its bearer independently of GitHub allowlist', async () => {
+    const store = createStore();
+    store.setAllowed(false);
+    const identity = { userId: 'google-account-1', provider: 'google' as const,
+      subject: 'google-subject-1', email: 'google@example.test' };
+    let active = true;
+    store.resolveIdentity = async (provider, subject, email) =>
+      provider === 'google' && subject === identity.subject && email === identity.email ? identity : null;
+    store.validateIdentity = async (candidate) => active && candidate.userId === identity.userId;
+    const user = { email: identity.email, githubUserId: '', githubLogin: '',
+      provider: 'google' as const, googleSubject: identity.subject };
+    const oauth = new McpOAuthManager(config, store, { getSessionUser: async () => user } as never);
+    const app = Fastify();
+    await registerMcpOAuthRoutes(app, oauth);
+    const registered = await app.inject({ method: 'POST', url: '/oauth/register',
+      payload: { redirect_uris: ['https://client.example.test/callback'] } });
+    const clientId = registered.json().client_id as string;
+    const verifier = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~';
+    const url = new URL('/oauth/authorize', config.publicBaseUrl);
+    for (const [key, value] of Object.entries({
+      client_id: clientId, redirect_uri: 'https://client.example.test/callback',
+      response_type: 'code', scope: 'mcp', resource: 'https://screenshots.example.test/mcp',
+      code_challenge: pkceS256(verifier), code_challenge_method: 'S256'
+    })) url.searchParams.set(key, value);
+    const authorization = await app.inject({ method: 'GET', url: url.pathname + url.search });
+    expect(authorization.statusCode).toBe(302);
+    const code = new URL(authorization.headers.location!).searchParams.get('code')!;
+    const token = await app.inject({ method: 'POST', url: '/oauth/token',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ grant_type: 'authorization_code', code, client_id: clientId,
+        redirect_uri: 'https://client.example.test/callback', code_verifier: verifier }).toString() });
+    expect(token.statusCode).toBe(200);
+    const bearer = token.json().access_token as string;
+    expect((await oauth.verifyBearer('Bearer ' + bearer))?.identity).toEqual(identity);
+    active = false;
+    expect(await oauth.verifyBearer('Bearer ' + bearer)).toBeNull();
+    await app.close();
+  });
+});
