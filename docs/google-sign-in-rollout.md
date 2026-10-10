@@ -30,3 +30,10 @@ Do not drop the new table on rollback; retain legacy GitHub columns and routes u
 - PWA Preview PR #41 Compose passthrough
 - PWA Preview PR #42 account linking and unlinking
 - PWA Preview PR #43 explicit account merge
+
+## Current implementation checkpoint (2026-10-10)
+- Optional Google web sign-in and standalone Google identities have been wired.
+- GitHub web login remains available. Account linking, unlinking and explicit merging are **not** implemented.
+- **MCP limitation:** MCP authorization, refresh and bearer verification still check the legacy email-based `allowed_user` list, which is synchronized from the GitHub configuration. Google-only allowlisted users therefore cannot reliably use MCP. Do not attempt to fix this by granting access from the union of both allowlists: tokens currently identify email, not provider or immutable subject, and doing so could cross-authorize identities.
+- Required next security migration: bind MCP authorization codes, refresh records and signed access tokens to immutable account + provider identity; recheck active provider-specific authorization on every use, and preserve legacy GitHub tokens through a controlled transition.
+- A successful source CI run is not proof of live OAuth or PostgreSQL integration. Keep PR as Draft until provider-scoped MCP checks, linking/merge flows, database-backed tests and manual end-to-end testing are complete.
