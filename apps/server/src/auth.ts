@@ -479,7 +479,9 @@ export class AuthManager {
     if (!this.store.assessLink) {
       reply.code(503).send({ error: { code: 'LINK_UNAVAILABLE' } }); return;
     }
-    const outcome = await this.store.assessLink(user.githubUserId, pending.googleSubject);
+    const outcome = pending.direction === 'github'
+      ? await this.store.assessLink(pending.githubSubject, pending.googleSubject)
+      : await this.store.assessLink(pending.githubSubject, pending.googleSubject);
     const isMerge = outcome === 'merge_required';
     if (outcome === 'source_not_found') {
       reply.code(403).type('text/plain').send('GitHub-kontot finns inte längre.'); return;
