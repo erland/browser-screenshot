@@ -40,12 +40,15 @@ export type McpAccessToken = {
 
 export type OAuthRefreshRecord = { clientId: string; email: string; scope: string; resource: string };
 
+export type VerifiedMcpIdentity = { userId: string; provider: 'github' | 'google'; subject: string; email: string };
+
 export interface OAuthStore {
   registerClient(input: { redirectUris: string[]; clientName?: string | null }): Promise<OAuthClient>;
   getClient(clientId: string): Promise<OAuthClient | null>;
   createAuthorizationCode(input: OAuthCodeRecord): Promise<string>;
   consumeAuthorizationCode(code: string): Promise<OAuthCodeRecord | null>;
   isAllowed(email: string): Promise<boolean>;
+  resolveIdentity?(provider: 'github' | 'google', subject: string, email: string): Promise<VerifiedMcpIdentity | null>;
   saveRefreshToken(hash: string, record: OAuthRefreshRecord, expiresAt: Date): Promise<void>;
   consumeRefreshToken(hash: string, clientId: string): Promise<OAuthRefreshRecord | null>;
 }
@@ -182,6 +185,17 @@ export function createDatabaseOAuthStore(db: Pick<Database, 'query'>): OAuthStor
       return row ? { clientId: row.client_id, email: row.email, scope: row.scope, resource: row.resource } : null;
     },
     isAllowed: (email) => isEmailAllowed(db, email),
+    async resolveIdentity(provider, subject, email) {
+      const result = await db.query<{ user_id: string; verified_email: string }>(
+        `SELECT i.user_id, i.verified_email FROM app_user_identity i
+         JOIN app_user u ON u.id = i.user_id
+         WHERE i.provider = $1 AND i.provider_subject = $2
+           AND lower(i.verified_email) = lower($3)
+           AND u.id IS NOT NULL`, [provider, subject, email]
+      );
+      const row = result.rows[0];
+      return row ? { userId: row.user_id, provider, subject, email: row.verified_email.toLowerCase() } : null;
+    },
   };
 }
 
