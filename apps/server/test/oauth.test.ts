@@ -128,6 +128,31 @@ describe('MCP OAuth', () => {
 
 
 
+describe('MCP provider isolation', () => {
+  it('denies MCP grants from Google sessions even if their email is on the legacy allowlist', async () => {
+    const store = createStore();
+    const googleUser = { email: 'allowed@example.test', githubUserId: '', githubLogin: '',
+      provider: 'google' as const, googleSubject: 'immutable-google-subject' };
+    const oauth = new McpOAuthManager(config, store, { getSessionUser: async () => googleUser } as never);
+    const app = Fastify();
+    await registerMcpOAuthRoutes(app, oauth);
+    const registration = await app.inject({ method: 'POST', url: '/oauth/register',
+      payload: { redirect_uris: ['https://client.example.test/callback'] } });
+    const clientId = registration.json().client_id as string;
+    const verifier = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~';
+    const url = new URL('/oauth/authorize', config.publicBaseUrl);
+    for (const [key, value] of Object.entries({
+      client_id: clientId, redirect_uri: 'https://client.example.test/callback',
+      response_type: 'code', scope: 'mcp', resource: 'https://screenshots.example.test/mcp',
+      code_challenge: pkceS256(verifier), code_challenge_method: 'S256'
+    })) url.searchParams.set(key, value);
+    const response = await app.inject({ method: 'GET', url: url.pathname + url.search });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toBe('access_denied');
+    await app.close();
+  });
+});
+
 describe('MCP OAuth input hardening', () => {
   it('rejects malformed PKCE verifiers before consuming an authorization code', async () => {
     const store = createStore();
