@@ -289,6 +289,12 @@ export class McpOAuthManager {
       reply.redirect(`/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
       return;
     }
+    // Legacy MCP grants and tokens carry an email but no immutable provider identity.
+    // Until provider-bound MCP grants are migrated, only GitHub sessions may mint them.
+    if (user.provider === 'google') {
+      reply.code(403).send({ error: 'access_denied', error_description: 'MCP authorization currently requires GitHub sign-in.' });
+      return;
+    }
     if (!(await this.store.isAllowed(user.email))) {
       reply.code(403).send({ error: 'access_denied', error_description: 'This email address is not allowed.' });
       return;
