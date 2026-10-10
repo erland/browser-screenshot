@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
-import { isActiveGoogleIdentity, isEmailAllowed, upsertGithubUser, upsertGoogleUser } from './database.js';
+import { isActiveGoogleIdentity, isEmailAllowed, listLinkedProviderIdentities, upsertGithubUser, upsertGoogleUser } from './database.js';
 
 import { exchangeGoogleCode, googlePkceChallenge, verifyGoogleIdToken } from './google-oidc.js';
 
@@ -43,6 +43,7 @@ export type AuthStore = {
   upsert(user: { providerSubject: string; githubLogin: string; email?: string | null }): Promise<void>;
   upsertGoogle?(subject: string, email: string): Promise<void>;
   googleIsActive?(subject: string, email: string): Promise<boolean>;
+  listIdentities?(provider: 'github' | 'google', subject: string): Promise<{ provider: 'github' | 'google'; email: string | null }[]>;
 };
 
 export type AuthConfig = {
@@ -181,6 +182,7 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'>): Auth
     },
     upsertGoogle: (subject, email) => upsertGoogleUser(database, subject, email),
     googleIsActive: (subject, email) => isActiveGoogleIdentity(database, subject, email),
+    listIdentities: (provider, subject) => listLinkedProviderIdentities(database, provider, subject),
   };
 }
 
@@ -325,6 +327,21 @@ export class AuthManager {
     } catch {
       reply.code(502).send({ error: { code: 'OAUTH_PROVIDER_ERROR', message: 'Google authentication failed' } });
     }
+  }
+
+  async getLinkedIdentities(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const user = await this.authenticate(request, reply);
+    if (!user) return;
+    const provider = user.provider === 'google' ? 'google' : 'github';
+    const subject = provider === 'google' ? user.googleSubject : user.githubUserId;
+    if (!subject || !this.store.listIdentities) {
+      reply.code(503).send({ error: { code: 'IDENTITIES_UNAVAILABLE', message: 'Account identities are unavailable.' } });
+      return;
+    }
+    const identities = await this.store.listIdentities(provider, subject);
+    reply.header('cache-control', 'no-store').send({
+      identities: identities.map(identity => ({ provider: identity.provider, email: identity.email }))
+    });
   }
 
   logout(reply: FastifyReply): void {
