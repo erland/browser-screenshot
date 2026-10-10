@@ -1,8 +1,11 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
-import { isEmailAllowed, upsertGithubUser } from './database.js';
+import { isActiveGoogleIdentity, isEmailAllowed, upsertGithubUser, upsertGoogleUser } from './database.js';
 
+import { exchangeGoogleCode, googlePkceChallenge, verifyGoogleIdToken } from './google-oidc.js';
+
+const GOOGLE_STATE_COOKIE = 'browser_screenshot_google_state';
 const SESSION_COOKIE = 'browser_screenshot_session';
 const OAUTH_STATE_COOKIE = 'browser_screenshot_oauth_state';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
@@ -12,6 +15,8 @@ export type AuthenticatedUser = {
   email: string;
   githubUserId: string;
   githubLogin: string;
+  provider?: 'github' | 'google';
+  googleSubject?: string;
 };
 
 export type GithubProfile = {
@@ -36,6 +41,8 @@ export type GithubOAuthClient = {
 export type AuthStore = {
   isAllowed(email: string): Promise<boolean>;
   upsert(user: { providerSubject: string; githubLogin: string; email?: string | null }): Promise<void>;
+  upsertGoogle?(subject: string, email: string): Promise<void>;
+  googleIsActive?(subject: string, email: string): Promise<boolean>;
 };
 
 export type AuthConfig = {
@@ -43,6 +50,9 @@ export type AuthConfig = {
   clientSecret: string;
   sessionSecret: string;
   publicBaseUrl: string;
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleAllowedEmails?: readonly string[];
 };
 
 export function selectVerifiedGithubEmail(emails: GithubEmail[]): string | null {
@@ -169,6 +179,8 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'>): Auth
     async upsert(user) {
       await upsertGithubUser(database, user);
     },
+    upsertGoogle: (subject, email) => upsertGoogleUser(database, subject, email),
+    googleIsActive: (subject, email) => isActiveGoogleIdentity(database, subject, email),
   };
 }
 
@@ -183,7 +195,13 @@ export function loadAuthConfig(env = process.env): AuthConfig {
   if (sessionSecret.length < 32) throw new Error('SESSION_SECRET must be at least 32 characters');
   const parsed = new URL(publicBaseUrl);
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('PUBLIC_BASE_URL must use http or https');
-  return { clientId, clientSecret, sessionSecret, publicBaseUrl: parsed.origin };
+  const googleClientId = env.GOOGLE_CLIENT_ID?.trim();
+  const googleClientSecret = env.GOOGLE_CLIENT_SECRET?.trim();
+  if (Boolean(googleClientId) !== Boolean(googleClientSecret)) throw new Error('Both Google OAuth settings are required');
+  const googleAllowedEmails = (env.BROWSER_SCREENSHOT_GOOGLE_ALLOWLIST_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean);
+  if (googleAllowedEmails.some(email => !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email))) throw new Error('Invalid Google allowlist email');
+  return { clientId, clientSecret, sessionSecret, publicBaseUrl: parsed.origin,
+    googleClientId, googleClientSecret, googleAllowedEmails };
 }
 
 type OAuthStatePayload = SignedPayload & { nonce: string; returnTo?: string };
@@ -252,6 +270,63 @@ export class AuthManager {
     }
   }
 
+  googleEnabled(): boolean {
+    return Boolean(this.config.googleClientId && this.config.googleClientSecret &&
+      this.config.googleAllowedEmails?.length);
+  }
+
+  googleLogin(reply: FastifyReply, returnTo?: string): void {
+    if (!this.googleEnabled()) { reply.code(404).send({ error: 'Google login not configured' }); return; }
+    const nonce = randomBytes(24).toString('base64url');
+    const verifier = randomBytes(48).toString('base64url');
+    const state = randomBytes(24).toString('base64url');
+    const safeReturnTo = returnTo?.startsWith('/oauth/authorize?') ? returnTo : undefined;
+    const cookie = signPayload({ state, nonce, verifier, returnTo: safeReturnTo,
+      exp: Math.floor(Date.now() / 1000) + STATE_TTL_SECONDS }, this.config.sessionSecret);
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id', this.config.googleClientId!);
+    url.searchParams.set('redirect_uri', this.config.publicBaseUrl + '/auth/callback/google');
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', 'openid email');
+    url.searchParams.set('state', state);
+    url.searchParams.set('nonce', nonce);
+    url.searchParams.set('code_challenge', googlePkceChallenge(verifier));
+    url.searchParams.set('code_challenge_method', 'S256');
+    reply.header('set-cookie', serializeCookie(GOOGLE_STATE_COOKIE, cookie, STATE_TTL_SECONDS)).redirect(url.toString());
+  }
+
+  async googleCallback(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    if (!this.googleEnabled()) { reply.code(404).send({ error: 'Google login not configured' }); return; }
+    const query = request.query as { code?: string; state?: string };
+    const cookie = parseCookies(request.headers.cookie)[GOOGLE_STATE_COOKIE];
+    const state = cookie ? verifyPayload<OAuthStatePayload & { state: string; verifier: string }>(
+      cookie, this.config.sessionSecret) : null;
+    reply.header('set-cookie', clearCookie(GOOGLE_STATE_COOKIE));
+    if (!state || !query.code || !query.state || query.state !== state.state ||
+      typeof state.verifier !== 'string' || typeof state.nonce !== 'string') {
+      reply.code(400).send({ error: { code: 'INVALID_OAUTH_STATE', message: 'Invalid Google OAuth state' } }); return;
+    }
+    try {
+      const token = await exchangeGoogleCode({
+        clientId: this.config.googleClientId!, clientSecret: this.config.googleClientSecret!,
+        redirectUri: this.config.publicBaseUrl + '/auth/callback/google'
+      }, query.code, state.verifier);
+      const identity = await verifyGoogleIdToken(token, this.config.googleClientId!, state.nonce);
+      if (!this.config.googleAllowedEmails!.includes(identity.email)) {
+        reply.code(403).send({ error: { code: 'AUTH_NOT_ALLOWED', message: 'Google account is not allowlisted' } }); return;
+      }
+      if (!this.store.upsertGoogle) throw new Error('Google identity store unavailable');
+      await this.store.upsertGoogle(identity.subject, identity.email);
+      const session = signPayload({ email: identity.email, provider: 'google',
+        googleSubject: identity.subject, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS },
+        this.config.sessionSecret);
+      reply.headers({ 'set-cookie': [serializeCookie(SESSION_COOKIE, session, SESSION_TTL_SECONDS),
+        clearCookie(GOOGLE_STATE_COOKIE)], 'cache-control': 'no-store' }).redirect(state.returnTo ?? '/');
+    } catch {
+      reply.code(502).send({ error: { code: 'OAUTH_PROVIDER_ERROR', message: 'Google authentication failed' } });
+    }
+  }
+
   logout(reply: FastifyReply): void {
     reply.header('set-cookie', clearCookie(SESSION_COOKIE)).code(204).send();
   }
@@ -259,9 +334,15 @@ export class AuthManager {
   async getSessionUser(request: FastifyRequest): Promise<AuthenticatedUser | null> {
     const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
     const payload = token ? verifyPayload<SignedPayload & AuthenticatedUser>(token, this.config.sessionSecret) : null;
-    if (!payload || typeof payload.email !== 'string' || typeof payload.githubUserId !== 'string' || typeof payload.githubLogin !== 'string') return null;
+    if (!payload || typeof payload.email !== 'string') return null;
+    if (payload.provider === 'google' && typeof payload.googleSubject === 'string') {
+      const allowed = this.config.googleAllowedEmails?.includes(payload.email) ?? false;
+      if (!allowed || !this.store.googleIsActive || !(await this.store.googleIsActive(payload.googleSubject, payload.email))) return null;
+      return { email: payload.email, githubUserId: '', githubLogin: '', provider: 'google', googleSubject: payload.googleSubject };
+    }
+    if (typeof payload.githubUserId !== 'string' || typeof payload.githubLogin !== 'string') return null;
     if (!(await this.store.isAllowed(payload.email))) return null;
-    return { email: payload.email, githubUserId: payload.githubUserId, githubLogin: payload.githubLogin };
+    return { email: payload.email, githubUserId: payload.githubUserId, githubLogin: payload.githubLogin, provider: 'github' };
   }
 
   async authenticate(request: FastifyRequest, reply: FastifyReply): Promise<AuthenticatedUser | null> {
