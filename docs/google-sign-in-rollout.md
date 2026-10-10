@@ -58,3 +58,8 @@ The CI workflow now verifies pushes to `main` and pull requests; feature-branch 
 The provider-bound Google MCP authorization path is now implemented. An authenticated Google session must resolve to an existing Google identity by immutable subject, verified email and account ID; the resolved identity must pass provider-specific authorization before any grant is issued. The grant, refresh credential and bearer token carry that identity and revalidate it on use. GitHub authorization is unchanged, including its legacy email-only compatibility path.
 
 Earlier sections describing the temporary Google MCP block document historical rollout checkpoints rather than the current implementation. Do not merge until CI and database-backed tests pass, and account linking / merging / revocation behavior is reviewed.
+
+## Linked identity listing (read-only)
+An authenticated endpoint, `GET /api/account/identities`, now lists provider names and verified emails linked to the *same* internal user ID. It resolves the requesting session by provider and immutable subject; it does not use matching email as a linkage rule. Provider subject identifiers are deliberately omitted from the browser response.
+
+**Not implemented:** mutation routes for linking, unlinking or merging accounts. Before adding these, require fresh OAuth verification, same-origin protection for mutations, atomic account ownership checks and reliable invalidation of browser sessions and MCP credentials after changes. Do not present the read-only endpoint as complete account linking.
