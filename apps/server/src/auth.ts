@@ -277,13 +277,13 @@ export class AuthManager {
       this.config.googleAllowedEmails?.length);
   }
 
-  googleLogin(reply: FastifyReply, returnTo?: string): void {
+  googleLogin(reply: FastifyReply, returnTo?: string, linkSource?: { provider: 'github'; subject: string }): void {
     if (!this.googleEnabled()) { reply.code(404).send({ error: 'Google login not configured' }); return; }
     const nonce = randomBytes(24).toString('base64url');
     const verifier = randomBytes(48).toString('base64url');
     const state = randomBytes(24).toString('base64url');
     const safeReturnTo = returnTo?.startsWith('/oauth/authorize?') ? returnTo : undefined;
-    const cookie = signPayload({ state, nonce, verifier, returnTo: safeReturnTo,
+    const cookie = signPayload({ state, nonce, verifier, returnTo: safeReturnTo, ...(linkSource ? { linkSource } : {}),
       exp: Math.floor(Date.now() / 1000) + STATE_TTL_SECONDS }, this.config.sessionSecret);
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', this.config.googleClientId!);
@@ -297,11 +297,21 @@ export class AuthManager {
     reply.header('set-cookie', serializeCookie(GOOGLE_STATE_COOKIE, cookie, STATE_TTL_SECONDS)).redirect(url.toString());
   }
 
+  async startGoogleLink(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const user = await this.authenticate(request, reply);
+    if (!user) return;
+    if (user.provider !== 'github' || !user.githubUserId) {
+      reply.code(409).send({ error: { code: 'LINK_REQUIRES_GITHUB', message: 'Sign in with GitHub to begin linking Google.' } });
+      return;
+    }
+    this.googleLogin(reply, undefined, { provider: 'github', subject: user.githubUserId });
+  }
+
   async googleCallback(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     if (!this.googleEnabled()) { reply.code(404).send({ error: 'Google login not configured' }); return; }
     const query = request.query as { code?: string; state?: string };
     const cookie = parseCookies(request.headers.cookie)[GOOGLE_STATE_COOKIE];
-    const state = cookie ? verifyPayload<OAuthStatePayload & { state: string; verifier: string }>(
+    const state = cookie ? verifyPayload<OAuthStatePayload & { state: string; verifier: string; linkSource?: { provider: 'github'; subject: string } }>(
       cookie, this.config.sessionSecret) : null;
     reply.header('set-cookie', clearCookie(GOOGLE_STATE_COOKIE));
     if (!state || !query.code || !query.state || query.state !== state.state ||
@@ -316,6 +326,23 @@ export class AuthManager {
       const identity = await verifyGoogleIdToken(token, this.config.googleClientId!, state.nonce);
       if (!this.config.googleAllowedEmails!.includes(identity.email)) {
         reply.code(403).send({ error: { code: 'AUTH_NOT_ALLOWED', message: 'Google account is not allowlisted' } }); return;
+      }
+      if (state.linkSource) {
+        // Recheck the original session after returning from Google. A matching email
+        // alone must never authorize moving a provider identity between accounts.
+        const current = await this.getSessionUser(request);
+        if (!current || current.provider !== 'github' ||
+            current.githubUserId !== state.linkSource.subject) {
+          reply.code(403).send({ error: { code: 'LINK_SESSION_CHANGED', message: 'Original GitHub session is no longer valid.' } });
+          return;
+        }
+        // Fresh Google verification completed. No account is moved at this stage:
+        // explicit conflict assessment and consent must precede any mutation.
+        reply.header('cache-control', 'no-store').code(409).send({
+          error: { code: 'LINK_CONFIRMATION_REQUIRED',
+            message: 'Google identity verified. Account linking requires a separate confirmation step.' }
+        });
+        return;
       }
       if (!this.store.upsertGoogle) throw new Error('Google identity store unavailable');
       await this.store.upsertGoogle(identity.subject, identity.email);
