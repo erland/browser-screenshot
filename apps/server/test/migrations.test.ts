@@ -29,6 +29,7 @@ describe('database migrations', () => {
       { version: '005_mcp_refresh_retry' },
       { version: '006_external_identities' },
       { version: '007_google_accounts' },
+      { version: '008_mcp_provider_identity' },
     ]);
     await pool.end();
   });
