@@ -20,3 +20,20 @@ describe('MCP immutable identity lookup', () => {
     await expect(store.resolveIdentity?.('github', 'different-subject', 'user@example.test')).resolves.toBeNull();
   });
 });
+
+
+describe('Cross-provider isolation', () => {
+  it('does not infer a Google account from a matching GitHub email', async () => {
+    const query = vi.fn(async (_sql: string, values?: unknown[]) => ({
+      rows: values?.[0] === 'github'
+        ? [{ user_id: 'github-account', verified_email: 'shared@example.test' }]
+        : [], rowCount: values?.[0] === 'github' ? 1 : 0
+    }));
+    const store = createDatabaseOAuthStore({ query } as never);
+    const github = await store.resolveIdentity?.('github', 'github-immutable-id', 'shared@example.test');
+    const google = await store.resolveIdentity?.('google', 'google-immutable-id', 'shared@example.test');
+    expect(github?.userId).toBe('github-account');
+    expect(google).toBeNull();
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+});
