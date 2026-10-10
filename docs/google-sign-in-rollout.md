@@ -78,3 +78,6 @@ After a fresh Google verification, `/auth/callback/google` now sets a short-live
 
 ## Google unlinking checkpoint
 `POST /api/account/unlink/google` now requires a live GitHub session and same-origin request. It removes only the Google provider identity from that same account, leaving GitHub available for login. Existing identity-bound Google MCP bearer and refresh credentials are rejected at provider-identity validation after the unlink. This does **not** implement explicit account merging or browser-UI unlink confirmation. Review the lifecycle of standalone Google records and run real PostgreSQL integration tests before merging.
+
+## Linked Google sign-in regression check
+An ordinary Google sign-in now updates the existing `app_user_identity` record first. If the Google subject is already linked to a GitHub account, it retains the original `user_id` and does not create a duplicate standalone `app_user`. CI checks this on real PostgreSQL. This is account-lifecycle hardening, **not** permission to merge two already-existing accounts: the latter still requires explicit dual-account proof, transactional migration and token/session revocation.
