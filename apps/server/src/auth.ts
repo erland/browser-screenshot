@@ -479,12 +479,13 @@ export class AuthManager {
     if (!this.store.assessLink) {
       reply.code(503).send({ error: { code: 'LINK_UNAVAILABLE' } }); return;
     }
-    const outcome = pending.direction === 'github'
-      ? await this.store.assessLink(pending.githubSubject, pending.googleSubject)
-      : await this.store.assessLink(pending.githubSubject, pending.googleSubject);
+    const outcome = await this.store.assessLink(pending.githubSubject, pending.googleSubject);
     const isMerge = outcome === 'merge_required';
-    if (outcome === 'source_not_found') {
+    if (outcome === 'source_not_found' && pending.direction !== 'github') {
       reply.code(403).type('text/plain').send('GitHub-kontot finns inte längre.'); return;
+    }
+    if (outcome === 'target_not_found' && pending.direction === 'github') {
+      reply.code(403).type('text/plain').send('Google-kontot finns inte längre.'); return;
     }
     const heading = isMerge ? 'Slå ihop dina konton?' : pending.direction === 'github' ? 'Koppla GitHub till ditt konto?' : 'Koppla Google till ditt konto?';
     const explanation = isMerge
