@@ -284,8 +284,18 @@ describe('Google MCP provider-bound authorization', () => {
     expect(token.statusCode).toBe(200);
     const bearer = token.json().access_token as string;
     expect((await oauth.verifyBearer('Bearer ' + bearer))?.identity).toEqual(identity);
+    // A refresh credential must not bypass provider revocation.
+    const refreshToken = token.json().refresh_token as string;
     active = false;
     expect(await oauth.verifyBearer('Bearer ' + bearer)).toBeNull();
+    const refresh = await app.inject({ method: 'POST', url: '/oauth/token',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({
+        grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId
+      }).toString()
+    });
+    expect(refresh.statusCode).toBe(403);
+    expect(refresh.json().error).toBe('access_denied');
     await app.close();
   });
 });
