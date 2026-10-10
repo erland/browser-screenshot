@@ -12,6 +12,7 @@ export type Database = {
   query<T extends pg.QueryResultRow = pg.QueryResultRow>(text: string, values?: unknown[]): Promise<pg.QueryResult<T>>;
   close(): Promise<void>;
   migrate(): Promise<void>;
+  transaction<T>(action: (client: Pick<Database, 'query'>) => Promise<T>): Promise<T>;
 };
 
 function required(env: Env, key: string): string {
@@ -66,6 +67,20 @@ export function createDatabase(connectionString = databaseConnectionString()): D
   return {
     query: (text, values) => pool.query(text, values),
     close: () => pool.end(),
+    async transaction(action) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const result = await action(client);
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
     async migrate() {
       await runMigrations(pool);
     }
@@ -333,4 +348,51 @@ export async function unlinkGoogleFromGithubAccount(
     [githubSubject]
   );
   return (result.rowCount ?? 0) > 0 ? 'unlinked' : 'not_linked';
+}
+
+/**
+ * Merge only an independently verified, standalone Google account into
+ * the caller's GitHub account. A transaction holds both app_user rows,
+ * revokes grants for both accounts, moves the Google identity and removes
+ * the obsolete standalone Google app_user.
+ */
+export async function mergeVerifiedGoogleAccount(
+  db: Pick<Database, 'transaction'>,
+  githubSubject: string,
+  googleSubject: string
+): Promise<'merged' | 'already_linked' | 'not_mergeable'> {
+  return db.transaction(async client => {
+    const owners = await client.query<{ id: string; provider: string; provider_subject: string }>(
+      `SELECT u.id, u.provider, u.provider_subject
+       FROM app_user u
+       JOIN app_user_identity i ON i.user_id = u.id
+       WHERE (i.provider = 'github' AND i.provider_subject = $1)
+          OR (i.provider = 'google' AND i.provider_subject = $2)
+       ORDER BY u.id FOR UPDATE OF u`,
+      [githubSubject, googleSubject]);
+    const githubOwner = owners.rows.find(row => row.provider === 'github' && row.provider_subject === githubSubject);
+    const googleOwner = owners.rows.find(row => row.provider === 'google' && row.provider_subject === googleSubject);
+    if (!githubOwner || !googleOwner) return 'not_mergeable';
+    if (githubOwner.id === googleOwner.id) return 'already_linked';
+    const checks = await client.query<{ provider: string; provider_subject: string; user_id: string }>(
+      `SELECT provider, provider_subject, user_id FROM app_user_identity
+       WHERE user_id = ANY($1::uuid[]) FOR UPDATE`,
+      [[githubOwner.id, googleOwner.id]]);
+    if (checks.rows.length !== 2 ||
+      !checks.rows.some(row => row.user_id === githubOwner.id && row.provider === 'github' && row.provider_subject === githubSubject) ||
+      !checks.rows.some(row => row.user_id === googleOwner.id && row.provider === 'google' && row.provider_subject === googleSubject)) {
+      return 'not_mergeable';
+    }
+    await client.query('DELETE FROM oauth_authorization_code WHERE user_id = ANY($1::uuid[])',
+      [[githubOwner.id, googleOwner.id]]);
+    await client.query('DELETE FROM oauth_refresh_token WHERE user_id = ANY($1::uuid[])',
+      [[githubOwner.id, googleOwner.id]]);
+    await client.query(
+      `UPDATE app_user_identity SET user_id = $1, updated_at = now()
+       WHERE user_id = $2 AND provider = 'google' AND provider_subject = $3`,
+      [githubOwner.id, googleOwner.id, googleSubject]);
+    await client.query('DELETE FROM app_user WHERE id = $1 AND provider = $2 AND provider_subject = $3',
+      [googleOwner.id, 'google', googleSubject]);
+    return 'merged';
+  });
 }
