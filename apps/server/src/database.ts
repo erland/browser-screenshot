@@ -524,6 +524,7 @@ export async function unlinkAccountIdentity(
       'SELECT provider, provider_subject FROM app_user_identity WHERE user_id = $1 FOR UPDATE',
       [userId]
     );
+    if (!identities.rows.some(identity => identity.provider === authenticated.provider && identity.provider_subject === authenticated.subject)) return 'not_linked';
     const target = identities.rows.find(identity => identity.provider === removeProvider);
     if (!target) return 'not_linked';
     if (identities.rows.length <= 1) return 'last_identity';
