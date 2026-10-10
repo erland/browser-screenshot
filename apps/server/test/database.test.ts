@@ -131,9 +131,9 @@ describe('database helpers', () => {
 
 describe('Linked identity isolation', () => {
   it('fetches linked providers by immutable signed-in subject, never email alone', async () => {
-    const query = vi.fn(async (_sql: string, _values?: unknown[]) => ({ rows: [{
+    const query = vi.fn(async (...args: [string, unknown[]?]) => { void args; return { rows: [{
       provider: 'github', provider_subject: 'subject-1', verified_email: 'one@example.test'
-    }], rowCount: 1 }));
+    }], rowCount: 1 }; });
     const identities = await listLinkedProviderIdentities({ query } as never, 'github', 'subject-1');
     expect(identities).toEqual([{ provider: 'github', subject: 'subject-1', email: 'one@example.test' }]);
     expect(query.mock.calls[0][0]).toContain('linked.user_id = current_identity.user_id');
