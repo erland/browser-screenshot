@@ -117,6 +117,10 @@ try {
       }
     }
   }, mergeGithub, mergeGoogle), 'merged');
+  const revocation = await pool.query<{ mcp_tokens_invalid_before: Date | null }>(
+    'SELECT mcp_tokens_invalid_before FROM app_user WHERE id = $1', [mergeTarget.id]);
+  assert.ok(revocation.rows[0]?.mcp_tokens_invalid_before,
+    'account merge revokes previously issued bearer tokens');
   const moved = await pool.query<{ user_id: string }>(
     "SELECT user_id FROM app_user_identity WHERE provider='google' AND provider_subject=$1", [mergeGoogle]);
   assert.equal(moved.rows[0]?.user_id, mergeTarget.id, 'Google identity moved to current account');
