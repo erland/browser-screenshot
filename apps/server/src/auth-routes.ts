@@ -10,6 +10,7 @@ export async function registerAuthRoutes(app: FastifyInstance, auth: AuthManager
     const query = request.query as { returnTo?: string };
     auth.googleLogin(reply, query.returnTo);
   });
+  app.get('/auth/link/google', async (request, reply) => auth.startGoogleLink(request, reply));
   app.get('/auth/callback/google', async (request, reply) => auth.googleCallback(request, reply));
   app.get('/api/auth/providers', async () => ({ github: true, google: auth.googleEnabled() }));
   app.get('/auth/callback', async (request, reply) => auth.callback(request, reply));
