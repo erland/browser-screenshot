@@ -308,12 +308,28 @@ export async function unlinkGoogleFromGithubAccount(
   // Provider-bound bearer tokens become invalid immediately because their
   // Google identity no longer resolves to the account.
   const result = await db.query(
-    `DELETE FROM app_user_identity google
-     USING app_user_identity github
-     WHERE google.user_id = github.user_id
-       AND google.provider = 'google'
-       AND github.provider = 'github'
-       AND github.provider_subject = $1`,
+    `WITH removed AS (
+       DELETE FROM app_user_identity google
+       USING app_user_identity github
+       WHERE google.user_id = github.user_id
+         AND google.provider = 'google'
+         AND github.provider = 'github'
+         AND github.provider_subject = $1
+       RETURNING google.user_id, google.provider_subject
+     ), revoked_codes AS (
+       DELETE FROM oauth_authorization_code code
+       USING removed
+       WHERE code.user_id = removed.user_id
+         AND code.identity_provider = 'google'
+         AND code.identity_subject = removed.provider_subject
+     ), revoked_refresh AS (
+       DELETE FROM oauth_refresh_token token
+       USING removed
+       WHERE token.user_id = removed.user_id
+         AND token.identity_provider = 'google'
+         AND token.identity_subject = removed.provider_subject
+     )
+     SELECT user_id FROM removed`,
     [githubSubject]
   );
   return (result.rowCount ?? 0) > 0 ? 'unlinked' : 'not_linked';
