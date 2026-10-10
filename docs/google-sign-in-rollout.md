@@ -69,3 +69,6 @@ The database now provides `assessIdentityLink(source, target)` using immutable p
 
 ## Fresh Google verification before linking
 `GET /auth/link/google` now requires an authorized GitHub browser session and starts a new Google OIDC code flow with PKCE, nonce and a signed state containing the GitHub provider subject. On the callback, the original session and immutable GitHub subject are checked again. Even after successful Google verification the endpoint returns `LINK_CONFIRMATION_REQUIRED` and makes **no account mutation**. This is an intentional safe intermediate stage; complete transactional conflict handling, confirmation and account migration before exposing a working link button.
+
+## Atomic unclaimed-identity linking primitive
+`linkUnclaimedGoogleIdentity` now uses one INSERT ... SELECT with ON CONFLICT DO NOTHING to attach a never-before-claimed Google subject to a verified GitHub account. It never reassigns an existing Google identity. A conflict returns `merge_required` (or an applicable existing/missing status), and the caller must implement explicit consent and fresh OIDC before invoking it. **This primitive is not yet wired to the OAuth callback or confirmation endpoint.** End-to-end account linking remains unavailable until the confirmation workflow and revocation controls are completed.
