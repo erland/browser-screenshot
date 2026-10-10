@@ -40,3 +40,13 @@ Do not drop the new table on rollback; retain legacy GitHub columns and routes u
 
 ## MCP temporary isolation gate
 MCP authorization now rejects Google web sessions before minting a legacy email-only authorization code, even when the email appears in the GitHub allowlist. Existing GitHub MCP flow is retained. This is a temporary security restriction, **not** complete Google MCP support. Token schema and database records still need provider/subject binding before Google MCP access can be enabled.
+
+## MCP identity schema checkpoint
+Migration 008 adds nullable `user_id`, `identity_provider` and `identity_subject` on authorization codes and refresh tokens. Legacy records remain unchanged, and no identities are inferred from email. The application still issues legacy MCP tokens and rejects Google MCP grants until a separate, end-to-end implementation:
+1. Resolve the signed-in web identity to the canonical `app_user.id` and `app_user_identity` record.
+2. Bind authorization code, refresh token and signed bearer claims to the same immutable identity.
+3. Authorize against the specific provider's allowlist and active linked identity during authorization, exchange, refresh, and bearer verification.
+4. Design the legacy token transition with explicit expiration and anti-replay tests; never authorize a provider-bound token based on email-only legacy checks.
+5. Test PostgreSQL migrations, MCP flows for both providers, unlink/merge revocation, and live GitHub/Google sign-in before enabling Google MCP access.
+
+This additive schema alone does not make Google MCP functional.
