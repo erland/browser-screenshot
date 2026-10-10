@@ -257,3 +257,27 @@ describe('Google link verification initiation', () => {
     await app.close();
   });
 });
+
+
+describe('Explicit Google account link confirmation', () => {
+  it('rejects anonymous or cross-origin confirmation and never changes accounts', async () => {
+    const store = createStore();
+    store.linkGoogle = vi.fn(async () => 'linked' as const);
+    const auth = new AuthManager(config, store, createGithub());
+    const app = await buildApp({ serveFrontend: false, auth });
+    const anonymous = await app.inject({ method: 'POST', url: '/api/account/link/google/confirm',
+      headers: { origin: config.publicBaseUrl } });
+    expect(anonymous.statusCode).toBe(401);
+    const session = await login(app);
+    const crossOrigin = await app.inject({ method: 'POST', url: '/api/account/link/google/confirm',
+      headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}`,
+        origin: 'https://evil.example.test' } });
+    expect(crossOrigin.statusCode).toBe(403);
+    const missingConfirmation = await app.inject({ method: 'POST', url: '/api/account/link/google/confirm',
+      headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}`,
+        origin: config.publicBaseUrl } });
+    expect(missingConfirmation.statusCode).toBe(403);
+    expect(store.linkGoogle).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
