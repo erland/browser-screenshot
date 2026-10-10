@@ -502,13 +502,24 @@ export async function unlinkAccountIdentity(
     const target = identities.rows.find(identity => identity.provider === removeProvider);
     if (!target) return 'not_linked';
     if (identities.rows.length <= 1) return 'last_identity';
-    // Until the legacy app_user(provider, provider_subject) ownership fields
-    // are migrated, detaching that historical owner would allow an old login
-    // to recreate a link to the same account. Fail closed instead.
+    // A session authenticated with the identity being removed must not
+    // remain active after removal. Require sign-in via the retained provider.
+    if (authenticated.provider === removeProvider) return 'last_identity';
+    // The legacy owner columns remain for compatibility with existing login
+    // upserts. Repoint them to a retained verified identity before detaching
+    // the original owner; app_user.id is never changed.
     const legacy = await client.query<{ provider: string; provider_subject: string }>(
       'SELECT provider, provider_subject FROM app_user WHERE id = $1', [userId]);
-    if (legacy.rows[0]?.provider === removeProvider) return 'last_identity';
-    if (authenticated.provider === removeProvider) return 'last_identity';
+    if (legacy.rows[0]?.provider === removeProvider) {
+      const retained = identities.rows.find(identity => identity.provider !== removeProvider);
+      if (!retained) return 'last_identity';
+      await client.query(
+        `UPDATE app_user SET provider = $2, provider_subject = $3,
+           github_login = CASE WHEN $2 = 'github' THEN github_login ELSE NULL END,
+           updated_at = now() WHERE id = $1`,
+        [userId, retained.provider, retained.provider_subject]
+      );
+    }
     await client.query(
       'DELETE FROM oauth_authorization_code WHERE user_id = $1 AND identity_provider = $2 AND identity_subject = $3',
       [userId, removeProvider, target.provider_subject]
