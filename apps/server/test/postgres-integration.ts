@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { runMigrations, upsertGithubUser, upsertGoogleUser,
-  linkUnclaimedGoogleIdentity, unlinkGoogleFromGithubAccount } from '../src/database.js';
+  linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, unlinkGoogleFromGithubAccount } from '../src/database.js';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 try {
@@ -66,6 +66,62 @@ try {
   assert.equal(googleAfter.rowCount, 0);
   const githubAfter = await pool.query("SELECT 1 FROM app_user_identity WHERE provider='github' AND provider_subject=$1", [github]);
   assert.equal(githubAfter.rowCount, 1, 'GitHub remains usable after unlink');
+  const mergeGithub = 'merge-github-' + randomUUID();
+  const mergeGoogle = 'merge-google-' + randomUUID();
+  const mergeTarget = await upsertGithubUser(pool, {
+    providerSubject: mergeGithub, githubLogin: mergeGithub, email: 'merge@example.test'
+  });
+  await upsertGoogleUser(pool, mergeGoogle, 'merge@example.test');
+  const mergeSource = await pool.query<{ user_id: string }>(
+    "SELECT user_id FROM app_user_identity WHERE provider='google' AND provider_subject=$1", [mergeGoogle]);
+  const oldGoogleOwner = mergeSource.rows[0].user_id;
+  assert.notEqual(oldGoogleOwner, mergeTarget.id);
+  const legacyRefresh = 'merge-refresh-' + randomUUID();
+  await pool.query(
+    `INSERT INTO oauth_refresh_token
+     (token_hash,client_id,email,scope,resource,expires_at,user_id,identity_provider,identity_subject)
+     VALUES ($1,$2,'merge@example.test','mcp','https://example.test/mcp',
+       now() + interval '1 day',$3,'google',$4)`,
+    [legacyRefresh,clientId,oldGoogleOwner,mergeGoogle]);
+  assert.equal(await mergeVerifiedGoogleAccount({
+    transaction: async (action) => {
+      const connection = await pool.connect();
+      try {
+        await connection.query('BEGIN');
+        const value = await action(connection);
+        await connection.query('COMMIT');
+        return value;
+      } catch (error) {
+        await connection.query('ROLLBACK');
+        throw error;
+      } finally {
+        connection.release();
+      }
+    }
+  }, mergeGithub, mergeGoogle), 'merged');
+  const moved = await pool.query<{ user_id: string }>(
+    "SELECT user_id FROM app_user_identity WHERE provider='google' AND provider_subject=$1", [mergeGoogle]);
+  assert.equal(moved.rows[0]?.user_id, mergeTarget.id, 'Google identity moved to current account');
+  const obsolete = await pool.query('SELECT id FROM app_user WHERE id=$1', [oldGoogleOwner]);
+  assert.equal(obsolete.rowCount, 0, 'obsolete standalone Google account deleted');
+  const oldRefresh = await pool.query('SELECT token_hash FROM oauth_refresh_token WHERE token_hash=$1', [legacyRefresh]);
+  assert.equal(oldRefresh.rowCount, 0, 'old Google MCP refresh credential revoked');
+  assert.equal(await mergeVerifiedGoogleAccount({
+    transaction: async (action) => {
+      const connection = await pool.connect();
+      try {
+        await connection.query('BEGIN');
+        const value = await action(connection);
+        await connection.query('COMMIT');
+        return value;
+      } catch (error) {
+        await connection.query('ROLLBACK');
+        throw error;
+      } finally {
+        connection.release();
+      }
+    }
+  }, mergeGithub, mergeGoogle), 'not_mergeable');
   console.log('PostgreSQL identity integration checks passed');
 } finally {
   await pool.end();
