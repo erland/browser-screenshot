@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
-import { isActiveGoogleIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, linkUnclaimedGithubIdentity, mergeVerifiedGithubAccount, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, upsertGithubUser, upsertGoogleUser } from './database.js';
+import { isActiveGoogleIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, linkUnclaimedGithubIdentity, mergeVerifiedGithubAccount, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, unlinkAccountIdentity, upsertGithubUser, upsertGoogleUser } from './database.js';
 
 import { exchangeGoogleCode, googlePkceChallenge, verifyGoogleIdToken } from './google-oidc.js';
 
@@ -49,6 +49,7 @@ export type AuthStore = {
   linkGithub?(googleSubject: string, githubSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
   mergeGithub?(googleSubject: string, githubSubject: string): Promise<'merged' | 'already_linked' | 'not_mergeable'>;
   unlinkGoogle?(githubSubject: string): Promise<'unlinked' | 'not_linked'>;
+  unlinkIdentity?(authenticated: { provider: 'github' | 'google'; subject: string }, removeProvider: 'github' | 'google'): Promise<'unlinked' | 'not_linked' | 'last_identity'>;
   assessLink?(githubSubject: string, googleSubject: string): Promise<'already_linked' | 'merge_required' | 'source_not_found' | 'target_not_found'>;
   mergeGoogle?(githubSubject: string, googleSubject: string): Promise<'merged' | 'already_linked' | 'not_mergeable'>;
 };
@@ -195,6 +196,8 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'> & Part
     ...(database.transaction ? { mergeGithub: (googleSubject: string, githubSubject: string) =>
       mergeVerifiedGithubAccount({ transaction: database.transaction! }, googleSubject, githubSubject) } : {}),
     unlinkGoogle: (githubSubject) => unlinkGoogleFromGithubAccount(database, githubSubject),
+    ...(database.transaction ? { unlinkIdentity: (authenticated: { provider: 'github' | 'google'; subject: string }, removeProvider: 'github' | 'google') =>
+      unlinkAccountIdentity({ transaction: database.transaction! }, authenticated, removeProvider) } : {}),
     ...(database.transaction ? { mergeGoogle: (githubSubject: string, googleSubject: string) =>
       mergeVerifiedGoogleAccount({ transaction: database.transaction! }, githubSubject, googleSubject) } : {}),
     assessLink: async (githubSubject, googleSubject) => (await assessIdentityLink(database,
@@ -522,6 +525,32 @@ export class AuthManager {
       '}catch(e){status.textContent="Kunde inte kontakta servern. Kontrollera anslutningen och försök igen."}' +
       'finally{btn.disabled=false;btn.textContent=' + JSON.stringify(button) + ';}})})()</script></body></html>'
     );
+  }
+
+  async unlinkIdentity(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const user = await this.authenticate(request, reply);
+    if (!user) return;
+    if (request.headers.origin !== this.config.publicBaseUrl) {
+      reply.code(403).send({ error: { code: 'INVALID_ORIGIN' } }); return;
+    }
+    const provider = (request.params as { provider?: string }).provider;
+    if (provider !== 'github' && provider !== 'google') {
+      reply.code(400).send({ error: { code: 'INVALID_PROVIDER' } }); return;
+    }
+    const signedInProvider = user.provider === 'google' ? 'google' : 'github';
+    const subject = signedInProvider === 'google' ? user.googleSubject : user.githubUserId;
+    if (!subject || !this.store.unlinkIdentity) {
+      reply.code(503).send({ error: { code: 'UNLINK_UNAVAILABLE' } }); return;
+    }
+    const outcome = await this.store.unlinkIdentity({ provider: signedInProvider, subject }, provider);
+    reply.header('cache-control', 'no-store');
+    if (outcome === 'last_identity') {
+      reply.code(409).send({ error: { code: 'RETAIN_SIGN_IN', message: 'Logga in med det andra kopplade kontot innan du tar bort detta inloggningssätt.' } }); return;
+    }
+    if (outcome === 'not_linked') {
+      reply.code(404).send({ error: { code: 'IDENTITY_NOT_LINKED' } }); return;
+    }
+    reply.send({ status: 'unlinked' });
   }
 
   async unlinkGoogle(request: FastifyRequest, reply: FastifyReply): Promise<void> {
