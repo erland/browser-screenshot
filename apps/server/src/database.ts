@@ -152,6 +152,13 @@ export async function upsertGithubUser(
      RETURNING id`,
     [id, input.providerSubject, input.githubLogin, input.email ?? null]
   );
+  await db.query(
+    `INSERT INTO app_user_identity (user_id, provider, provider_subject, verified_email)
+     VALUES ($1, 'github', $2, $3)
+     ON CONFLICT (provider, provider_subject)
+     DO UPDATE SET verified_email = EXCLUDED.verified_email, updated_at = now()`,
+    [result.rows[0].id, input.providerSubject, input.email?.toLowerCase() ?? null]
+  );
   return result.rows[0];
 }
 
