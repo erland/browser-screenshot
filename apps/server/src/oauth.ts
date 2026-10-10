@@ -323,19 +323,26 @@ export class McpOAuthManager {
       reply.redirect(`/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
       return;
     }
-    // Legacy MCP grants and tokens carry an email but no immutable provider identity.
-    // Until provider-bound MCP grants are migrated, only GitHub sessions may mint them.
-    if (user.provider === 'google') {
-      reply.code(403).send({ error: 'access_denied', error_description: 'MCP authorization currently requires GitHub sign-in.' });
+    // Google grants must be bound to a verified immutable subject and a live account.
+    // Never authorize Google via the legacy email-only GitHub allowlist.
+    const isGoogle = user.provider === 'google';
+    const subject = isGoogle ? user.googleSubject : user.githubUserId;
+    if (isGoogle && (!subject || !this.store.resolveIdentity || !this.store.validateIdentity)) {
+      reply.code(403).send({ error: 'access_denied', error_description: 'Google identity verification is unavailable.' });
       return;
     }
-    if (!(await this.store.isAllowed(user.email))) {
+    const identity = subject && this.store.resolveIdentity
+      ? await this.store.resolveIdentity(isGoogle ? 'google' : 'github', subject, user.email) : null;
+    if (isGoogle) {
+      if (!identity || !this.store.validateIdentity || !(await this.store.validateIdentity(identity))) {
+        reply.code(403).send({ error: 'access_denied', error_description: 'Google identity is not authorized.' });
+        return;
+      }
+    } else if (!(await this.store.isAllowed(user.email))) {
       reply.code(403).send({ error: 'access_denied', error_description: 'This email address is not allowed.' });
       return;
     }
 
-    const identity = user.githubUserId && this.store.resolveIdentity
-      ? await this.store.resolveIdentity('github', user.githubUserId, user.email) : null;
     const code = await this.store.createAuthorizationCode({
       ...(identity ? { identity } : {}),
       clientId,
