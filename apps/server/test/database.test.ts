@@ -110,17 +110,21 @@ describe('database helpers', () => {
   });
 
   it('uses stable GitHub subject as identity key and updates mutable metadata', async () => {
-    const query = vi.fn().mockResolvedValue({ rows: [{ id: 'user-1' }], rowCount: 1 });
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [{ id: 'user-1' }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 });
     const result = await upsertGithubUser({ query } as never, {
       providerSubject: '12345678',
       githubLogin: 'renamed-user',
       email: 'user@example.test'
     });
     expect(result).toEqual({ id: 'user-1' });
-    expect(query).toHaveBeenCalledTimes(2);
-    expect(query.mock.calls[0][1]).toEqual(expect.arrayContaining(['12345678', 'renamed-user']));
-    expect(query.mock.calls[1][0]).toContain('INSERT INTO app_user_identity');
-    expect(query.mock.calls[1][1]).toEqual(['user-1', '12345678', 'user@example.test']);
+    expect(query).toHaveBeenCalledTimes(3);
+    expect(query.mock.calls[0][0]).toContain('UPDATE app_user_identity');
+    expect(query.mock.calls[1][1]).toEqual(expect.arrayContaining(['12345678', 'renamed-user']));
+    expect(query.mock.calls[2][0]).toContain('INSERT INTO app_user_identity');
+    expect(query.mock.calls[2][1]).toEqual(['user-1', '12345678', 'user@example.test']);
   });
 
   it('authorizes only enabled allowlist entries', async () => {

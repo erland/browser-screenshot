@@ -4,7 +4,7 @@ import {
   createScreenshot,
   getCurrentUser,
   getLinkedIdentities,
-  unlinkGoogle,
+  unlinkIdentity,
   type LinkedIdentity,
   getScreenshotPresets,
   logout,
@@ -128,12 +128,13 @@ export function App() {
     }
   }
 
-  async function disconnectGoogle() {
-    if (!window.confirm('Vill du koppla bort Google från ditt konto? Du kan fortsätta logga in med GitHub.')) return;
+  async function disconnectIdentity(provider: 'github' | 'google') {
+    const name = provider === 'github' ? 'GitHub' : 'Google';
+    if (!window.confirm(`Vill du koppla bort ${name}? Du måste vara inloggad med det andra kopplade kontot. Ditt användarkonto finns kvar.`)) return;
     setUnlinkBusy(true);
     setError(null);
     try {
-      await unlinkGoogle();
+      await unlinkIdentity(provider);
       setIdentities(await getLinkedIdentities());
     } catch (err) {
       setError(errorMessage(err));
@@ -218,10 +219,11 @@ export function App() {
           <a className="button secondary" href="/auth/link/google">Koppla Google-konto</a>}
         {auth.user.provider === 'google' && !identities.some(identity => identity.provider === 'github') &&
           <a className="button secondary" href="/auth/link/github">Koppla GitHub-konto</a>}
-        {identities.some(identity => identity.provider === 'github') &&
-          identities.some(identity => identity.provider === 'google') &&
-          <button type="button" className="button secondary" disabled={unlinkBusy}
-            onClick={disconnectGoogle}>{unlinkBusy ? 'Kopplar bort…' : 'Koppla bort Google'}</button>}
+        {identities.length > 1 && (['google', 'github'] as const).filter(provider =>
+          identities.some(identity => identity.provider === provider)).map(provider =>
+          <button key={provider} type="button" className="button secondary" disabled={unlinkBusy || auth.user.provider === provider}
+            title={auth.user.provider === provider ? 'Logga först in med det andra kopplade kontot' : undefined}
+            onClick={() => disconnectIdentity(provider)}>{unlinkBusy ? 'Kopplar bort…' : `Koppla bort ${provider === 'google' ? 'Google' : 'GitHub'}`}</button>)}
       </section>}
       <main className="workspace">
         <section className="panel controls-panel">

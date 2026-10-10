@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
-import { isActiveGoogleIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, linkUnclaimedGithubIdentity, mergeVerifiedGithubAccount, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, upsertGithubUser, upsertGoogleUser } from './database.js';
+import { isActiveGoogleIdentity, isActiveGithubIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, linkUnclaimedGithubIdentity, mergeVerifiedGithubAccount, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, unlinkAccountIdentity, upsertGithubUser, upsertGoogleUser } from './database.js';
 
 import { exchangeGoogleCode, googlePkceChallenge, verifyGoogleIdToken } from './google-oidc.js';
 
@@ -44,11 +44,13 @@ export type AuthStore = {
   upsert(user: { providerSubject: string; githubLogin: string; email?: string | null }): Promise<void>;
   upsertGoogle?(subject: string, email: string): Promise<void>;
   googleIsActive?(subject: string, email: string): Promise<boolean>;
+  githubIsActive?(subject: string, email: string): Promise<boolean>;
   listIdentities?(provider: 'github' | 'google', subject: string): Promise<{ provider: 'github' | 'google'; email: string | null }[]>;
   linkGoogle?(githubSubject: string, googleSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
   linkGithub?(googleSubject: string, githubSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
   mergeGithub?(googleSubject: string, githubSubject: string): Promise<'merged' | 'already_linked' | 'not_mergeable'>;
   unlinkGoogle?(githubSubject: string): Promise<'unlinked' | 'not_linked'>;
+  unlinkIdentity?(authenticated: { provider: 'github' | 'google'; subject: string }, removeProvider: 'github' | 'google'): Promise<'unlinked' | 'not_linked' | 'last_identity'>;
   assessLink?(githubSubject: string, googleSubject: string): Promise<'already_linked' | 'merge_required' | 'source_not_found' | 'target_not_found'>;
   mergeGoogle?(githubSubject: string, googleSubject: string): Promise<'merged' | 'already_linked' | 'not_mergeable'>;
 };
@@ -189,12 +191,15 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'> & Part
     },
     upsertGoogle: (subject, email) => upsertGoogleUser(database, subject, email),
     googleIsActive: (subject, email) => isActiveGoogleIdentity(database, subject, email),
+    githubIsActive: (subject, email) => isActiveGithubIdentity(database, subject, email),
     listIdentities: (provider, subject) => listLinkedProviderIdentities(database, provider, subject),
     linkGoogle: (githubSubject, googleSubject, email) => linkUnclaimedGoogleIdentity(database, githubSubject, googleSubject, email),
     linkGithub: (googleSubject, githubSubject, email) => linkUnclaimedGithubIdentity(database, googleSubject, githubSubject, email),
     ...(database.transaction ? { mergeGithub: (googleSubject: string, githubSubject: string) =>
       mergeVerifiedGithubAccount({ transaction: database.transaction! }, googleSubject, githubSubject) } : {}),
     unlinkGoogle: (githubSubject) => unlinkGoogleFromGithubAccount(database, githubSubject),
+    ...(database.transaction ? { unlinkIdentity: (authenticated: { provider: 'github' | 'google'; subject: string }, removeProvider: 'github' | 'google') =>
+      unlinkAccountIdentity({ transaction: database.transaction! }, authenticated, removeProvider) } : {}),
     ...(database.transaction ? { mergeGoogle: (githubSubject: string, googleSubject: string) =>
       mergeVerifiedGoogleAccount({ transaction: database.transaction! }, githubSubject, googleSubject) } : {}),
     assessLink: async (githubSubject, googleSubject) => (await assessIdentityLink(database,
@@ -524,6 +529,32 @@ export class AuthManager {
     );
   }
 
+  async unlinkIdentity(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const user = await this.authenticate(request, reply);
+    if (!user) return;
+    if (request.headers.origin !== this.config.publicBaseUrl) {
+      reply.code(403).send({ error: { code: 'INVALID_ORIGIN' } }); return;
+    }
+    const provider = (request.params as { provider?: string }).provider;
+    if (provider !== 'github' && provider !== 'google') {
+      reply.code(400).send({ error: { code: 'INVALID_PROVIDER' } }); return;
+    }
+    const signedInProvider = user.provider === 'google' ? 'google' : 'github';
+    const subject = signedInProvider === 'google' ? user.googleSubject : user.githubUserId;
+    if (!subject || !this.store.unlinkIdentity) {
+      reply.code(503).send({ error: { code: 'UNLINK_UNAVAILABLE' } }); return;
+    }
+    const outcome = await this.store.unlinkIdentity({ provider: signedInProvider, subject }, provider);
+    reply.header('cache-control', 'no-store');
+    if (outcome === 'last_identity') {
+      reply.code(409).send({ error: { code: 'RETAIN_SIGN_IN', message: 'Logga in med det andra kopplade kontot innan du tar bort detta inloggningssätt.' } }); return;
+    }
+    if (outcome === 'not_linked') {
+      reply.code(404).send({ error: { code: 'IDENTITY_NOT_LINKED' } }); return;
+    }
+    reply.send({ status: 'unlinked' });
+  }
+
   async unlinkGoogle(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const user = await this.authenticate(request, reply);
     if (!user) return;
@@ -574,6 +605,7 @@ export class AuthManager {
     }
     if (typeof payload.githubUserId !== 'string' || typeof payload.githubLogin !== 'string') return null;
     if (!(await this.store.isAllowed(payload.email))) return null;
+    if (this.store.githubIsActive && !(await this.store.githubIsActive(payload.githubUserId, payload.email))) return null;
     return { email: payload.email, githubUserId: payload.githubUserId, githubLogin: payload.githubLogin, provider: 'github' };
   }
 

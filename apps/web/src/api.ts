@@ -129,8 +129,8 @@ export async function getLinkedIdentities(): Promise<LinkedIdentity[]> {
   return body.identities;
 }
 
-export async function unlinkGoogle(): Promise<void> {
-  const response = await fetch('/api/account/unlink/google', {
+export async function unlinkIdentity(provider: 'github' | 'google'): Promise<void> {
+  const response = await fetch(`/api/account/unlink/${provider}`, {
     method: 'POST', headers: { origin: window.location.origin, accept: 'application/json' }
   });
   if (!response.ok) throw await apiError(response);

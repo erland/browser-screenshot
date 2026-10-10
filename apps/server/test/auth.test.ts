@@ -286,7 +286,7 @@ describe('Explicit Google account link confirmation', () => {
 describe('Google unlinking protections', () => {
   it('requires authenticated GitHub session and a same-origin request', async () => {
     const store = createStore();
-    store.unlinkGoogle = vi.fn(async () => 'unlinked' as const);
+    store.unlinkIdentity = vi.fn(async () => 'unlinked' as const);
     const app = await buildApp({ serveFrontend: false, auth: new AuthManager(config, store, createGithub()) });
     const anonymous = await app.inject({ method: 'POST', url: '/api/account/unlink/google',
       headers: { origin: config.publicBaseUrl } });
@@ -296,13 +296,13 @@ describe('Google unlinking protections', () => {
       headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}`,
         origin: 'https://untrusted.example.test' } });
     expect(denied.statusCode).toBe(403);
-    expect(store.unlinkGoogle).not.toHaveBeenCalled();
+    expect(store.unlinkIdentity).not.toHaveBeenCalled();
     const allowed = await app.inject({ method: 'POST', url: '/api/account/unlink/google',
       headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}`,
         origin: config.publicBaseUrl } });
     expect(allowed.statusCode).toBe(200);
     expect(allowed.json().status).toBe('unlinked');
-    expect(store.unlinkGoogle).toHaveBeenCalledWith('12345');
+    expect(store.unlinkIdentity).toHaveBeenCalledWith({ provider: 'github', subject: '12345' }, 'google');
     await app.close();
   });
 });
