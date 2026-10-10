@@ -177,6 +177,14 @@ export async function isEmailAllowed(
 export async function upsertGoogleUser(
   db: Pick<Database, 'query'>, subject: string, email: string
 ): Promise<void> {
+  // An existing Google identity may already be linked to a GitHub account.
+  // Refresh its verified email without creating an orphan standalone app_user.
+  const existing = await db.query(
+    `UPDATE app_user_identity SET verified_email = $2, updated_at = now()
+     WHERE provider = 'google' AND provider_subject = $1`,
+    [subject, email.toLowerCase()]
+  );
+  if ((existing.rowCount ?? 0) > 0) return;
   const id = randomUUID();
   await db.query(
     `INSERT INTO app_user (id, provider, provider_subject, github_login, email)
