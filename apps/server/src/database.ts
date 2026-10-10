@@ -291,3 +291,22 @@ export async function linkUnclaimedGoogleIdentity(
   if (assessment.outcome === 'source_not_found') return 'source_not_found';
   return 'merge_required';
 }
+
+export async function unlinkGoogleFromGithubAccount(
+  db: Pick<Database, 'query'>,
+  githubSubject: string
+): Promise<'unlinked' | 'not_linked'> {
+  // Only remove Google from an account that still has a GitHub login.
+  // Provider-bound bearer tokens become invalid immediately because their
+  // Google identity no longer resolves to the account.
+  const result = await db.query(
+    `DELETE FROM app_user_identity google
+     USING app_user_identity github
+     WHERE google.user_id = github.user_id
+       AND google.provider = 'google'
+       AND github.provider = 'github'
+       AND github.provider_subject = $1`,
+    [githubSubject]
+  );
+  return (result.rowCount ?? 0) > 0 ? 'unlinked' : 'not_linked';
+}
