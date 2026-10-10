@@ -50,3 +50,6 @@ Migration 008 adds nullable `user_id`, `identity_provider` and `identity_subject
 5. Test PostgreSQL migrations, MCP flows for both providers, unlink/merge revocation, and live GitHub/Google sign-in before enabling Google MCP access.
 
 This additive schema alone does not make Google MCP functional.
+
+## CI and MCP lookup checkpoint
+The CI workflow now verifies pushes to `main` and pull requests; feature-branch pushes with an open PR no longer produce a second push-triggered run. The MCP store can resolve an immutable `(provider, subject, verified email)` identity to its internal account ID, and GitHub sign-ins maintain the mapping. OAuth grants/tokens are **not yet bound** to that result, so the existing Google MCP denial remains in force. Complete grant/token binding and revocation checks before removing it.
