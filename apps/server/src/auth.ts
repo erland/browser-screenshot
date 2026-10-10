@@ -179,7 +179,7 @@ export function createGithubOAuthClient(config: Pick<AuthConfig, 'clientId' | 'c
   };
 }
 
-export function createDatabaseAuthStore(database: Pick<Database, 'query'>): AuthStore {
+export function createDatabaseAuthStore(database: Pick<Database, 'query'> & Partial<Pick<Database, 'transaction'>>): AuthStore {
   return {
     isAllowed: (email) => isEmailAllowed(database, email),
     async upsert(user) {
@@ -190,7 +190,8 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'>): Auth
     listIdentities: (provider, subject) => listLinkedProviderIdentities(database, provider, subject),
     linkGoogle: (githubSubject, googleSubject, email) => linkUnclaimedGoogleIdentity(database, githubSubject, googleSubject, email),
     unlinkGoogle: (githubSubject) => unlinkGoogleFromGithubAccount(database, githubSubject),
-    mergeGoogle: (githubSubject, googleSubject) => mergeVerifiedGoogleAccount(database, githubSubject, googleSubject),
+    ...(database.transaction ? { mergeGoogle: (githubSubject: string, googleSubject: string) =>
+      mergeVerifiedGoogleAccount({ transaction: database.transaction! }, githubSubject, googleSubject) } : {}),
     assessLink: async (githubSubject, googleSubject) => (await assessIdentityLink(database,
       { provider: 'github', subject: githubSubject }, { provider: 'google', subject: googleSubject })).outcome,
   };
