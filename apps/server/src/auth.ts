@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
-import { isActiveGoogleIdentity, isEmailAllowed, linkUnclaimedGoogleIdentity, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, upsertGithubUser, upsertGoogleUser } from './database.js';
+import { isActiveGoogleIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, upsertGithubUser, upsertGoogleUser } from './database.js';
 
 import { exchangeGoogleCode, googlePkceChallenge, verifyGoogleIdToken } from './google-oidc.js';
 
@@ -47,6 +47,7 @@ export type AuthStore = {
   listIdentities?(provider: 'github' | 'google', subject: string): Promise<{ provider: 'github' | 'google'; email: string | null }[]>;
   linkGoogle?(githubSubject: string, googleSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
   unlinkGoogle?(githubSubject: string): Promise<'unlinked' | 'not_linked'>;
+  assessLink?(githubSubject: string, googleSubject: string): Promise<'already_linked' | 'merge_required' | 'source_not_found' | 'target_not_found'>;
 };
 
 export type AuthConfig = {
@@ -188,6 +189,8 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'>): Auth
     listIdentities: (provider, subject) => listLinkedProviderIdentities(database, provider, subject),
     linkGoogle: (githubSubject, googleSubject, email) => linkUnclaimedGoogleIdentity(database, githubSubject, googleSubject, email),
     unlinkGoogle: (githubSubject) => unlinkGoogleFromGithubAccount(database, githubSubject),
+    assessLink: async (githubSubject, googleSubject) => (await assessIdentityLink(database,
+      { provider: 'github', subject: githubSubject }, { provider: 'google', subject: googleSubject })).outcome,
   };
 }
 
@@ -382,6 +385,14 @@ export class AuthManager {
       reply.code(403).send({ error: { code: 'INVALID_LINK_CONFIRMATION', message: 'Link confirmation expired or invalid.' } });
       return;
     }
+    const mergeRequested = (request.body as { merge?: unknown } | undefined)?.merge === true;
+    if (mergeRequested) {
+      // No account merge is performed until the transaction and grant revocation
+      // have been implemented and independently verified against PostgreSQL.
+      reply.code(409).send({ error: { code: 'MERGE_NOT_READY',
+        message: 'Account merging is not enabled yet; no accounts were changed.' } });
+      return;
+    }
     if (!this.store.linkGoogle) {
       reply.code(503).send({ error: { code: 'LINK_UNAVAILABLE' } });
       return;
@@ -402,18 +413,40 @@ export class AuthManager {
     const pending = cookie ? verifyPayload<SignedPayload & {
       githubSubject: string; googleSubject: string; email: string
     }>(cookie, this.config.sessionSecret) : null;
-    if (!pending || user.provider !== 'github' || pending.githubSubject !== user.githubUserId) {
-      reply.code(403).type('text/plain').send('Link confirmation expired.'); return;
+    if (!pending || user.provider !== 'github' || pending.githubSubject !== user.githubUserId ||
+        typeof pending.googleSubject !== 'string' || typeof pending.email !== 'string' ||
+        !this.config.googleAllowedEmails?.includes(pending.email)) {
+      reply.code(403).type('text/plain').send('Bekräftelsen har gått ut. Börja om.'); return;
     }
-    reply.header('cache-control', 'no-store').type('text/html; charset=utf-8').send(
-      '<!doctype html><html lang="sv"><meta charset="utf-8"><title>Bekräfta kontokoppling</title>' +
-      '<main><h1>Koppla Google till GitHub-kontot?</h1>' +
-      '<p>En ny Google-verifiering har genomförts. Om Google-identiteten redan tillhör ett annat konto krävs separat sammanslagning.</p>' +
-      '<button id="confirm">Bekräfta koppling</button><p id="status"></p></main>' +
+    if (!this.store.assessLink) {
+      reply.code(503).send({ error: { code: 'LINK_UNAVAILABLE' } }); return;
+    }
+    const outcome = await this.store.assessLink(user.githubUserId, pending.googleSubject);
+    const isMerge = outcome === 'merge_required';
+    if (outcome === 'source_not_found') {
+      reply.code(403).type('text/plain').send('GitHub-kontot finns inte längre.'); return;
+    }
+    const heading = isMerge ? 'Slå ihop dina konton?' : 'Koppla Google till ditt konto?';
+    const explanation = isMerge
+      ? 'Google-identiteten tillhör redan ett annat konto. Om du fortsätter behålls ditt nuvarande GitHub-konto och kontona slås ihop. Befintliga MCP-anslutningar kan behöva godkännas på nytt.'
+      : 'Du kan logga in på samma konto med både GitHub och Google.';
+    const button = isMerge ? 'Slå ihop konton' : 'Bekräfta koppling';
+    // All values inserted into HTML here are application-owned constants.
+    reply.header('cache-control', 'no-store').header('content-security-policy',
+      "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'")
+      .type('text/html; charset=utf-8').send(
+      '<!doctype html><html lang="sv"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+      '<title>Bekräfta kontoåtgärd</title><main style="max-width:32rem;margin:4rem auto;font:1rem system-ui;padding:1rem">' +
+      '<h1>' + heading + '</h1><p>' + explanation + '</p>' +
+      '<div style="display:flex;gap:1rem"><a href="/" id="cancel">Avbryt</a>' +
+      '<button id="confirm">' + button + '</button></div><p id="status" role="status"></p></main>' +
       '<script>document.getElementById("confirm").onclick=async()=>{' +
-      'const r=await fetch("/api/account/link/google/confirm",{method:"POST",credentials:"same-origin"});' +
-      'document.getElementById("status").textContent=r.ok?"Kontot är kopplat.":' +
-      '"Koppling kunde inte slutföras. Ett annat konto kan redan äga identiteten."}</script></html>'
+      'const r=await fetch("/api/account/link/google/confirm",{method:"POST",credentials:"same-origin",' +
+      'headers:{"content-type":"application/json"},body:JSON.stringify({merge:' + String(isMerge) + '})});' +
+      'if(r.ok){location.assign("/");return;}' +
+      'document.getElementById("status").textContent=r.status===409?' +
+      '"Kontona kunde inte slås ihop ännu. Inga ändringar gjordes.":' +
+      '"Åtgärden misslyckades. Inga ändringar har bekräftats."}</script></html>'
     );
   }
 
