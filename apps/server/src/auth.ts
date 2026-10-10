@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
-import { isActiveGoogleIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, linkUnclaimedGithubIdentity, mergeVerifiedGithubAccount, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, unlinkAccountIdentity, upsertGithubUser, upsertGoogleUser } from './database.js';
+import { isActiveGoogleIdentity, isActiveGithubIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, linkUnclaimedGithubIdentity, mergeVerifiedGithubAccount, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, unlinkAccountIdentity, upsertGithubUser, upsertGoogleUser } from './database.js';
 
 import { exchangeGoogleCode, googlePkceChallenge, verifyGoogleIdToken } from './google-oidc.js';
 
@@ -44,6 +44,7 @@ export type AuthStore = {
   upsert(user: { providerSubject: string; githubLogin: string; email?: string | null }): Promise<void>;
   upsertGoogle?(subject: string, email: string): Promise<void>;
   googleIsActive?(subject: string, email: string): Promise<boolean>;
+  githubIsActive?(subject: string, email: string): Promise<boolean>;
   listIdentities?(provider: 'github' | 'google', subject: string): Promise<{ provider: 'github' | 'google'; email: string | null }[]>;
   linkGoogle?(githubSubject: string, googleSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
   linkGithub?(googleSubject: string, githubSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
@@ -190,6 +191,7 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'> & Part
     },
     upsertGoogle: (subject, email) => upsertGoogleUser(database, subject, email),
     googleIsActive: (subject, email) => isActiveGoogleIdentity(database, subject, email),
+    githubIsActive: (subject, email) => isActiveGithubIdentity(database, subject, email),
     listIdentities: (provider, subject) => listLinkedProviderIdentities(database, provider, subject),
     linkGoogle: (githubSubject, googleSubject, email) => linkUnclaimedGoogleIdentity(database, githubSubject, googleSubject, email),
     linkGithub: (googleSubject, githubSubject, email) => linkUnclaimedGithubIdentity(database, googleSubject, githubSubject, email),
@@ -603,6 +605,7 @@ export class AuthManager {
     }
     if (typeof payload.githubUserId !== 'string' || typeof payload.githubLogin !== 'string') return null;
     if (!(await this.store.isAllowed(payload.email))) return null;
+    if (this.store.githubIsActive && !(await this.store.githubIsActive(payload.githubUserId, payload.email))) return null;
     return { email: payload.email, githubUserId: payload.githubUserId, githubLogin: payload.githubLogin, provider: 'github' };
   }
 
