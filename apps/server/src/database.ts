@@ -371,9 +371,22 @@ export async function mergeVerifiedGoogleAccount(
        ORDER BY u.id FOR UPDATE OF u`,
       [githubSubject, googleSubject]);
     const githubOwner = owners.rows.find(row => row.provider === 'github' && row.provider_subject === githubSubject);
-    const googleOwner = owners.rows.find(row => row.provider === 'google' && row.provider_subject === googleSubject);
-    if (!githubOwner || !googleOwner) return 'not_mergeable';
-    if (githubOwner.id === googleOwner.id) return 'already_linked';
+    if (!githubOwner) return 'not_mergeable';
+    // The Google identity can already belong to this GitHub-owned app_user.
+    // In that case the owner row is GitHub, not Google.
+    const identities = await client.query<{ provider: string; provider_subject: string; user_id: string }>(
+      `SELECT provider, provider_subject, user_id FROM app_user_identity
+       WHERE (provider = 'github' AND provider_subject = $1)
+          OR (provider = 'google' AND provider_subject = $2)
+       FOR UPDATE`,
+      [githubSubject, googleSubject]);
+    const googleIdentity = identities.rows.find(row =>
+      row.provider === 'google' && row.provider_subject === googleSubject);
+    if (!googleIdentity) return 'not_mergeable';
+    if (googleIdentity.user_id === githubOwner.id) return 'already_linked';
+    const googleOwner = owners.rows.find(row => row.id === googleIdentity.user_id &&
+      row.provider === 'google' && row.provider_subject === googleSubject);
+    if (!googleOwner) return 'not_mergeable';
     const checks = await client.query<{ provider: string; provider_subject: string; user_id: string }>(
       `SELECT provider, provider_subject, user_id FROM app_user_identity
        WHERE user_id = ANY($1::uuid[]) FOR UPDATE`,
