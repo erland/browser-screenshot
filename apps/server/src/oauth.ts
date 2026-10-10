@@ -37,6 +37,7 @@ export type McpAccessToken = {
   scopes: string[];
   resource: string;
   exp: number;
+  issuedAt?: number;
   identity?: VerifiedMcpIdentity;
 };
 
@@ -51,7 +52,7 @@ export interface OAuthStore {
   consumeAuthorizationCode(code: string): Promise<OAuthCodeRecord | null>;
   isAllowed(email: string): Promise<boolean>;
   resolveIdentity?(provider: 'github' | 'google', subject: string, email: string): Promise<VerifiedMcpIdentity | null>;
-  validateIdentity?(identity: VerifiedMcpIdentity): Promise<boolean>;
+  validateIdentity?(identity: VerifiedMcpIdentity, issuedAt?: number): Promise<boolean>;
   saveRefreshToken(hash: string, record: OAuthRefreshRecord, expiresAt: Date): Promise<void>;
   consumeRefreshToken(hash: string, clientId: string): Promise<OAuthRefreshRecord | null>;
 }
@@ -198,7 +199,15 @@ export function createDatabaseOAuthStore(db: Pick<Database, 'query'>): OAuthStor
         } } : {}) } : null;
     },
     isAllowed: (email) => isEmailAllowed(db, email),
-    async validateIdentity(identity) {
+    async validateIdentity(identity, issuedAt) {
+      if (issuedAt !== undefined || identity.userId) {
+        const revocation = await db.query<{ mcp_tokens_invalid_before: Date | null }>(
+          'SELECT mcp_tokens_invalid_before FROM app_user WHERE id = $1', [identity.userId]);
+        if (!revocation.rows[0]) return false;
+        const invalidBefore = revocation.rows[0].mcp_tokens_invalid_before;
+        if (invalidBefore && (!Number.isFinite(issuedAt) ||
+            (issuedAt as number) <= new Date(invalidBefore).getTime())) return false;
+      }
       const resolved = await this.resolveIdentity?.(identity.provider, identity.subject, identity.email);
       if (!resolved || resolved.userId !== identity.userId) return false;
       if (identity.provider === 'github') return isEmailAllowed(db, identity.email);
@@ -363,6 +372,7 @@ export class McpOAuthManager {
     const exp = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL_SECONDS;
     const accessToken = signToken({
       email: record.email, clientId: record.clientId, scopes: [MCP_SCOPE], resource: record.resource, exp,
+      issuedAt: Date.now(),
       ...(record.identity ? { identity: record.identity } : {})
     }, this.config.tokenSecret);
     const refreshToken = predecessor
@@ -435,7 +445,7 @@ export class McpOAuthManager {
     const payload = verifySignedToken(header.slice('Bearer '.length), this.config.tokenSecret);
     if (!payload || payload.resource !== this.resource || !payload.scopes.includes(MCP_SCOPE)) return null;
     if (payload.identity) {
-      if (!this.store.validateIdentity || !(await this.store.validateIdentity(payload.identity))) return null;
+      if (!this.store.validateIdentity || !(await this.store.validateIdentity(payload.identity, payload.issuedAt))) return null;
     } else if (!(await this.store.isAllowed(payload.email))) return null;
     return payload;
   }
