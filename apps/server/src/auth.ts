@@ -267,6 +267,22 @@ export class AuthManager {
         reply.code(403).send({ error: { code: 'AUTH_NOT_ALLOWED', message: 'This email address is not allowed to use Browser Screenshot.' } });
         return;
       }
+      const linkSource = (statePayload as OAuthStatePayload & {
+        linkSource?: { provider: string; subject: string }
+      }).linkSource;
+      if (linkSource) {
+        const original = await this.getSessionUser(request);
+        if (linkSource.provider !== 'google' || !original ||
+            original.provider !== 'google' || original.googleSubject !== linkSource.subject) {
+          reply.code(403).send({ error: { code: 'LINK_SESSION_CHANGED' } });
+          return;
+        }
+        // Do not silently switch accounts or link based on a matching email.
+        // A confirmed, transactional merge is required for an existing GitHub identity.
+        reply.code(409).send({ error: { code: 'GITHUB_LINK_CONFIRMATION_REQUIRED',
+          message: 'GitHub was verified. Account linking requires explicit confirmation; no accounts were changed.' } });
+        return;
+      }
       await this.store.upsert({ providerSubject: githubUserId, githubLogin: profile.login, email });
       const session = signPayload({
         email,
@@ -306,6 +322,26 @@ export class AuthManager {
     url.searchParams.set('code_challenge', googlePkceChallenge(verifier));
     url.searchParams.set('code_challenge_method', 'S256');
     reply.header('set-cookie', serializeCookie(GOOGLE_STATE_COOKIE, cookie, STATE_TTL_SECONDS)).redirect(url.toString());
+  }
+
+  async startGithubLink(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const user = await this.authenticate(request, reply);
+    if (!user) return;
+    if (user.provider !== 'google' || !user.googleSubject) {
+      reply.code(409).send({ error: { code: 'LINK_REQUIRES_GOOGLE' } });
+      return;
+    }
+    // A separate, signed OAuth state binds the GitHub callback to this Google session.
+    const state = signPayload({ nonce: randomBytes(24).toString('base64url'),
+      linkSource: { provider: 'google', subject: user.googleSubject },
+      exp: Math.floor(Date.now() / 1000) + STATE_TTL_SECONDS }, this.config.sessionSecret);
+    const authorize = new URL('https://github.com/login/oauth/authorize');
+    authorize.searchParams.set('client_id', this.config.clientId);
+    authorize.searchParams.set('redirect_uri', this.redirectUri);
+    authorize.searchParams.set('state', state);
+    authorize.searchParams.set('scope', 'read:user user:email');
+    reply.header('set-cookie', serializeCookie(OAUTH_STATE_COOKIE, state, STATE_TTL_SECONDS))
+      .redirect(authorize.toString());
   }
 
   async startGoogleLink(request: FastifyRequest, reply: FastifyReply): Promise<void> {
