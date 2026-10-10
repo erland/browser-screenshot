@@ -205,3 +205,30 @@ export async function isActiveGoogleIdentity(
   );
   return (result.rowCount ?? 0) > 0;
 }
+
+export type LinkedProviderIdentity = {
+  provider: 'github' | 'google';
+  subject: string;
+  email: string | null;
+};
+
+export async function listLinkedProviderIdentities(
+  db: Pick<Database, 'query'>,
+  provider: 'github' | 'google',
+  subject: string
+): Promise<LinkedProviderIdentity[]> {
+  // Resolve the signed-in identity first: email addresses are not account keys.
+  const result = await db.query<{
+    provider: 'github' | 'google'; provider_subject: string; verified_email: string | null;
+  }>(
+    `SELECT linked.provider, linked.provider_subject, linked.verified_email
+     FROM app_user_identity current_identity
+     JOIN app_user_identity linked ON linked.user_id = current_identity.user_id
+     WHERE current_identity.provider = $1 AND current_identity.provider_subject = $2
+     ORDER BY linked.provider`,
+    [provider, subject]
+  );
+  return result.rows.map(row => ({
+    provider: row.provider, subject: row.provider_subject, email: row.verified_email
+  }));
+}
