@@ -139,7 +139,7 @@ try {
         connection.release();
       }
     }
-  }, mergeGithub, mergeGoogle), 'not_mergeable');
+  }, mergeGithub, mergeGoogle), 'already_linked');
   console.log('PostgreSQL identity integration checks passed');
 } finally {
   await pool.end();
