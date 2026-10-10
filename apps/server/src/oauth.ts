@@ -137,9 +137,10 @@ export function createDatabaseOAuthStore(db: Pick<Database, 'query'>): OAuthStor
         WHERE expires_at <= now() OR (used_at IS NOT NULL AND used_at < now() - interval '10 minutes')`);
       await db.query(
         `INSERT INTO oauth_authorization_code
-          (code_hash, client_id, redirect_uri, email, code_challenge, scope, resource, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + interval '5 minutes')`,
-        [codeHash(code), input.clientId, input.redirectUri, input.email.toLowerCase(), input.codeChallenge, input.scope, input.resource]
+          (code_hash, client_id, redirect_uri, email, code_challenge, scope, resource, expires_at, user_id, identity_provider, identity_subject)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + interval '5 minutes', $8, $9, $10)`,
+        [codeHash(code), input.clientId, input.redirectUri, input.email.toLowerCase(), input.codeChallenge, input.scope, input.resource,
+          input.identity?.userId ?? null, input.identity?.provider ?? null, input.identity?.subject ?? null]
       );
       return code;
     },
@@ -151,11 +152,12 @@ export function createDatabaseOAuthStore(db: Pick<Database, 'query'>): OAuthStor
         code_challenge: string;
         scope: string;
         resource: string;
+        user_id: string | null; identity_provider: 'github' | 'google' | null; identity_subject: string | null;
       }>(
         `UPDATE oauth_authorization_code
          SET used_at = now()
          WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
-         RETURNING client_id, redirect_uri, email, code_challenge, scope, resource`,
+         RETURNING client_id, redirect_uri, email, code_challenge, scope, resource, user_id, identity_provider, identity_subject`,
         [codeHash(code)]
       );
       await db.query(`DELETE FROM oauth_authorization_code
@@ -168,24 +170,32 @@ export function createDatabaseOAuthStore(db: Pick<Database, 'query'>): OAuthStor
         codeChallenge: row.code_challenge,
         scope: row.scope,
         resource: row.resource,
+        ...(row.user_id && row.identity_provider && row.identity_subject ? { identity: {
+          userId: row.user_id, provider: row.identity_provider, subject: row.identity_subject, email: row.email
+        } } : {}),
       } : null;
     },
     async saveRefreshToken(hash, record, expiresAt) {
       await db.query(
-        `INSERT INTO oauth_refresh_token (token_hash, client_id, email, scope, resource, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (token_hash) DO NOTHING`,
-        [hash, record.clientId, record.email, record.scope, record.resource, expiresAt]
+        `INSERT INTO oauth_refresh_token (token_hash, client_id, email, scope, resource, expires_at, user_id, identity_provider, identity_subject)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (token_hash) DO NOTHING`,
+        [hash, record.clientId, record.email, record.scope, record.resource, expiresAt,
+          record.identity?.userId ?? null, record.identity?.provider ?? null, record.identity?.subject ?? null]
       );
     },
     async consumeRefreshToken(hash, clientId) {
-      const result = await db.query<{ client_id: string; email: string; scope: string; resource: string }>(
+      const result = await db.query<{ client_id: string; email: string; scope: string; resource: string;
+        user_id: string | null; identity_provider: 'github' | 'google' | null; identity_subject: string | null }>(
         `UPDATE oauth_refresh_token SET rotated_at = COALESCE(rotated_at, now())
          WHERE token_hash = $1 AND client_id = $2 AND expires_at > now()
          AND (rotated_at IS NULL OR rotated_at >= now() - interval '30 seconds')
-         RETURNING client_id, email, scope, resource`, [hash, clientId]
+         RETURNING client_id, email, scope, resource, user_id, identity_provider, identity_subject`, [hash, clientId]
       );
       const row = result.rows[0];
-      return row ? { clientId: row.client_id, email: row.email, scope: row.scope, resource: row.resource } : null;
+      return row ? { clientId: row.client_id, email: row.email, scope: row.scope, resource: row.resource,
+        ...(row.user_id && row.identity_provider && row.identity_subject ? { identity: {
+          userId: row.user_id, provider: row.identity_provider, subject: row.identity_subject, email: row.email
+        } } : {}) } : null;
     },
     isAllowed: (email) => isEmailAllowed(db, email),
     async validateIdentity(identity) {
@@ -383,7 +393,7 @@ export class McpOAuthManager {
           sendOAuthError(reply, 400, 'invalid_target', 'Resource mismatch.');
           return;
         }
-        if (!(await this.store.isAllowed(record.email))) {
+        if (record.identity ? (!this.store.validateIdentity || !(await this.store.validateIdentity(record.identity))) : !(await this.store.isAllowed(record.email))) {
           diagnostic('rejected', 'access_denied');
           sendOAuthError(reply, 403, 'access_denied', 'This email address is no longer allowed.');
           return;
@@ -406,7 +416,7 @@ export class McpOAuthManager {
       sendOAuthError(reply, 400, 'invalid_grant', 'Authorization code is invalid, expired, already used or PKCE validation failed.');
       return;
     }
-    if (!(await this.store.isAllowed(record.email))) {
+    if (record.identity ? (!this.store.validateIdentity || !(await this.store.validateIdentity(record.identity))) : !(await this.store.isAllowed(record.email))) {
       sendOAuthError(reply, 403, 'access_denied', 'This email address is no longer allowed.');
       return;
     }
