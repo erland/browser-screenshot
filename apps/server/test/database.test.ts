@@ -113,8 +113,10 @@ describe('database helpers', () => {
       email: 'user@example.test'
     });
     expect(result).toEqual({ id: 'user-1' });
-    expect(query).toHaveBeenCalledOnce();
+    expect(query).toHaveBeenCalledTimes(2);
     expect(query.mock.calls[0][1]).toEqual(expect.arrayContaining(['12345678', 'renamed-user']));
+    expect(query.mock.calls[1][0]).toContain('INSERT INTO app_user_identity');
+    expect(query.mock.calls[1][1]).toEqual(['user-1', '12345678', 'user@example.test']);
   });
 
   it('authorizes only enabled allowlist entries', async () => {
