@@ -119,3 +119,19 @@ export async function logout(): Promise<void> {
   const response = await fetch('/auth/logout', { method: 'POST' });
   if (!response.ok && response.status !== 204) throw await apiError(response);
 }
+
+export type LinkedIdentity = { provider: 'github' | 'google'; email: string | null };
+
+export async function getLinkedIdentities(): Promise<LinkedIdentity[]> {
+  const response = await fetch('/api/account/identities', { headers: { accept: 'application/json' } });
+  if (!response.ok) throw await apiError(response);
+  const body = await response.json() as { identities: LinkedIdentity[] };
+  return body.identities;
+}
+
+export async function unlinkGoogle(): Promise<void> {
+  const response = await fetch('/api/account/unlink/google', {
+    method: 'POST', headers: { origin: window.location.origin, accept: 'application/json' }
+  });
+  if (!response.ok) throw await apiError(response);
+}
