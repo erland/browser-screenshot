@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
-import { isActiveGoogleIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, upsertGithubUser, upsertGoogleUser } from './database.js';
+import { isActiveGoogleIdentity, isEmailAllowed, assessIdentityLink, linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, linkUnclaimedGithubIdentity, mergeVerifiedGithubAccount, listLinkedProviderIdentities, unlinkGoogleFromGithubAccount, upsertGithubUser, upsertGoogleUser } from './database.js';
 
 import { exchangeGoogleCode, googlePkceChallenge, verifyGoogleIdToken } from './google-oidc.js';
 
@@ -46,6 +46,8 @@ export type AuthStore = {
   googleIsActive?(subject: string, email: string): Promise<boolean>;
   listIdentities?(provider: 'github' | 'google', subject: string): Promise<{ provider: 'github' | 'google'; email: string | null }[]>;
   linkGoogle?(githubSubject: string, googleSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
+  linkGithub?(googleSubject: string, githubSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
+  mergeGithub?(googleSubject: string, githubSubject: string): Promise<'merged' | 'already_linked' | 'not_mergeable'>;
   unlinkGoogle?(githubSubject: string): Promise<'unlinked' | 'not_linked'>;
   assessLink?(githubSubject: string, googleSubject: string): Promise<'already_linked' | 'merge_required' | 'source_not_found' | 'target_not_found'>;
   mergeGoogle?(githubSubject: string, googleSubject: string): Promise<'merged' | 'already_linked' | 'not_mergeable'>;
@@ -189,6 +191,9 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'> & Part
     googleIsActive: (subject, email) => isActiveGoogleIdentity(database, subject, email),
     listIdentities: (provider, subject) => listLinkedProviderIdentities(database, provider, subject),
     linkGoogle: (githubSubject, googleSubject, email) => linkUnclaimedGoogleIdentity(database, githubSubject, googleSubject, email),
+    linkGithub: (googleSubject, githubSubject, email) => linkUnclaimedGithubIdentity(database, googleSubject, githubSubject, email),
+    ...(database.transaction ? { mergeGithub: (googleSubject: string, githubSubject: string) =>
+      mergeVerifiedGithubAccount({ transaction: database.transaction! }, googleSubject, githubSubject) } : {}),
     unlinkGoogle: (githubSubject) => unlinkGoogleFromGithubAccount(database, githubSubject),
     ...(database.transaction ? { mergeGoogle: (githubSubject: string, googleSubject: string) =>
       mergeVerifiedGoogleAccount({ transaction: database.transaction! }, githubSubject, googleSubject) } : {}),
@@ -418,21 +423,24 @@ export class AuthManager {
     }
     const pendingCookie = parseCookies(request.headers.cookie)[LINK_PENDING_COOKIE];
     const pending = pendingCookie ? verifyPayload<SignedPayload & {
-      githubSubject: string; googleSubject: string; email: string
+      githubSubject: string; googleSubject: string; email: string; direction?: string
     }>(pendingCookie, this.config.sessionSecret) : null;
     reply.header('set-cookie', clearCookie(LINK_PENDING_COOKIE)).header('cache-control', 'no-store');
-    if (!pending || user.provider !== 'github' || pending.githubSubject !== user.githubUserId ||
+    if (!pending || !(pending.direction === 'github' ? (user.provider === 'google' && pending.googleSubject === user.googleSubject) : (user.provider === 'github' && pending.githubSubject === user.githubUserId)) ||
         typeof pending.googleSubject !== 'string' || typeof pending.email !== 'string' ||
-        !this.config.googleAllowedEmails?.includes(pending.email)) {
+        (pending.direction !== 'github' && !this.config.googleAllowedEmails?.includes(pending.email))) {
       reply.code(403).send({ error: { code: 'INVALID_LINK_CONFIRMATION', message: 'Link confirmation expired or invalid.' } });
       return;
     }
     const mergeRequested = (request.body as { merge?: unknown } | undefined)?.merge === true;
     if (mergeRequested) {
-      if (!this.store.mergeGoogle) {
+      if (pending.direction === 'github' && !this.store.mergeGithub) { reply.code(503).send({ error: { code: 'MERGE_UNAVAILABLE' } }); return; }
+      if (pending.direction !== 'github' && !this.store.mergeGoogle) {
         reply.code(503).send({ error: { code: 'MERGE_UNAVAILABLE' } }); return;
       }
-      const merged = await this.store.mergeGoogle(user.githubUserId, pending.googleSubject);
+      const merged = pending.direction === 'github'
+        ? await this.store.mergeGithub!(pending.googleSubject, pending.githubSubject)
+        : await this.store.mergeGoogle!(pending.githubSubject, pending.googleSubject);
       if (merged === 'merged' || merged === 'already_linked') {
         reply.send({ status: merged }); return;
       }
@@ -440,11 +448,14 @@ export class AuthManager {
         message: 'These accounts cannot be merged safely.' } });
       return;
     }
-    if (!this.store.linkGoogle) {
+    if (pending.direction === 'github' && !this.store.linkGithub) { reply.code(503).send({ error: { code: 'LINK_UNAVAILABLE' } }); return; }
+    if (pending.direction !== 'github' && !this.store.linkGoogle) {
       reply.code(503).send({ error: { code: 'LINK_UNAVAILABLE' } });
       return;
     }
-    const outcome = await this.store.linkGoogle(user.githubUserId, pending.googleSubject, pending.email);
+    const outcome = pending.direction === 'github'
+      ? await this.store.linkGithub!(pending.googleSubject, pending.githubSubject, pending.email)
+      : await this.store.linkGoogle!(pending.githubSubject, pending.googleSubject, pending.email);
     if (outcome === 'linked' || outcome === 'already_linked') {
       reply.send({ status: outcome });
       return;
@@ -458,11 +469,11 @@ export class AuthManager {
     if (!user) return;
     const cookie = parseCookies(request.headers.cookie)[LINK_PENDING_COOKIE];
     const pending = cookie ? verifyPayload<SignedPayload & {
-      githubSubject: string; googleSubject: string; email: string
+      githubSubject: string; googleSubject: string; email: string; direction?: string
     }>(cookie, this.config.sessionSecret) : null;
-    if (!pending || user.provider !== 'github' || pending.githubSubject !== user.githubUserId ||
+    if (!pending || !(pending.direction === 'github' ? (user.provider === 'google' && pending.googleSubject === user.googleSubject) : (user.provider === 'github' && pending.githubSubject === user.githubUserId)) ||
         typeof pending.googleSubject !== 'string' || typeof pending.email !== 'string' ||
-        !this.config.googleAllowedEmails?.includes(pending.email)) {
+        (pending.direction !== 'github' && !this.config.googleAllowedEmails?.includes(pending.email))) {
       reply.code(403).type('text/plain').send('Bekräftelsen har gått ut. Börja om.'); return;
     }
     if (!this.store.assessLink) {
@@ -473,9 +484,9 @@ export class AuthManager {
     if (outcome === 'source_not_found') {
       reply.code(403).type('text/plain').send('GitHub-kontot finns inte längre.'); return;
     }
-    const heading = isMerge ? 'Slå ihop dina konton?' : 'Koppla Google till ditt konto?';
+    const heading = isMerge ? 'Slå ihop dina konton?' : pending.direction === 'github' ? 'Koppla GitHub till ditt konto?' : 'Koppla Google till ditt konto?';
     const explanation = isMerge
-      ? 'Google-identiteten tillhör redan ett annat konto. Om du fortsätter behålls ditt nuvarande GitHub-konto och kontona slås ihop. Befintliga MCP-anslutningar kan behöva godkännas på nytt.'
+      ? 'Den verifierade identiteten tillhör redan ett annat konto. Om du fortsätter behålls det konto du är inloggad på och kontona slås ihop. MCP-anslutningar kan behöva godkännas på nytt.'
       : 'Du kan logga in på samma konto med både GitHub och Google.';
     const button = isMerge ? 'Slå ihop konton' : 'Bekräfta koppling';
     // All values inserted into HTML here are application-owned constants.
