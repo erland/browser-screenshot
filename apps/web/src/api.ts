@@ -2,6 +2,8 @@ export type AuthenticatedUser = {
   email: string;
   githubUserId: string;
   githubLogin: string;
+  provider?: 'github' | 'google';
+  googleSubject?: string;
 };
 
 export type ScreenshotPresetName = 'desktop' | 'tablet' | 'mobile';
