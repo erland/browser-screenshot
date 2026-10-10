@@ -66,3 +66,6 @@ An authenticated endpoint, `GET /api/account/identities`, now lists provider nam
 
 ## Explicit account merge assessment
 The database now provides `assessIdentityLink(source, target)` using immutable provider subjects. It reports missing identities, already-linked identities, or `merge_required` when the two verified identities belong to different internal accounts. It **does not** link, merge, migrate data or revoke sessions. Linking must later require fresh verification of both identities, explicit merge consent, and transactional record/token handling. Email equality never approves a merge.
+
+## Fresh Google verification before linking
+`GET /auth/link/google` now requires an authorized GitHub browser session and starts a new Google OIDC code flow with PKCE, nonce and a signed state containing the GitHub provider subject. On the callback, the original session and immutable GitHub subject are checked again. Even after successful Google verification the endpoint returns `LINK_CONFIRMATION_REQUIRED` and makes **no account mutation**. This is an intentional safe intermediate stage; complete transactional conflict handling, confirmation and account migration before exposing a working link button.
