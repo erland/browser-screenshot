@@ -3,6 +3,7 @@ import {
   configuredAllowlistEmails,
   databaseConnectionString,
   isEmailAllowed,
+  listLinkedProviderIdentities,
   syncConfiguredAllowlist,
   upsertGithubUser,
 } from '../src/database.js';
@@ -125,5 +126,18 @@ describe('database helpers', () => {
     await expect(isEmailAllowed({ query: allowedQuery } as never, 'User@Example.Test ')).resolves.toBe(true);
     expect(allowedQuery).toHaveBeenCalledWith(expect.stringContaining('lower(email)'), ['user@example.test']);
     await expect(isEmailAllowed({ query: deniedQuery } as never, 'other@example.test')).resolves.toBe(false);
+  });
+});
+
+describe('Linked identity isolation', () => {
+  it('fetches linked providers by immutable signed-in subject, never email alone', async () => {
+    const query = vi.fn(async () => ({ rows: [{
+      provider: 'github', provider_subject: 'subject-1', verified_email: 'one@example.test'
+    }], rowCount: 1 }));
+    const identities = await listLinkedProviderIdentities({ query } as never, 'github', 'subject-1');
+    expect(identities).toEqual([{ provider: 'github', subject: 'subject-1', email: 'one@example.test' }]);
+    expect(query.mock.calls[0][0]).toContain('linked.user_id = current_identity.user_id');
+    expect(query.mock.calls[0][0]).toContain('current_identity.provider_subject = $2');
+    expect(query.mock.calls[0][1]).toEqual(['github', 'subject-1']);
   });
 });
