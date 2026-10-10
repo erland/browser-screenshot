@@ -39,12 +39,19 @@ function errorMessage(error: unknown): string {
 
 export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' });
+  const [googleEnabled, setGoogleEnabled] = useState(false);
   const [presets, setPresets] = useState<ScreenshotPresetsResponse | null>(null);
   const [form, setForm] = useState<ScreenshotFormState>(DEFAULT_FORM);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<ScreenshotMetadata | null>(null);
+
+  useEffect(() => {
+    fetch('/api/auth/providers').then(r => r.ok ? r.json() : null)
+      .then((value: { google?: boolean } | null) => setGoogleEnabled(value?.google === true))
+      .catch(() => setGoogleEnabled(false));
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -131,8 +138,9 @@ export function App() {
         <section className="auth-card">
           <p className="eyebrow">Browser Screenshot</p>
           <h1>Skärmdumpar av webbsidor, på begäran.</h1>
-          <p className="lede">Logga in med GitHub. Endast e-postadresser som finns i tjänstens allowlist får använda screenshot-funktionen.</p>
+          <p className="lede">Logga in med GitHub eller Google. Endast e-postadresser som finns i tjänstens allowlist får använda screenshot-funktionen.</p>
           <a className="button primary full" href="/auth/login">Logga in med GitHub</a>
+          {googleEnabled && <a className="button secondary full" href="/auth/login/google">Logga in med Google</a>}
         </section>
       </main>
     );
@@ -162,7 +170,7 @@ export function App() {
           <p className="subtitle">Öppna en publik webbsida i Chromium och få tillbaka en PNG.</p>
         </div>
         <div className="account">
-          <div className="account-copy"><strong>@{auth.user.githubLogin}</strong><span>{auth.user.email}</span></div>
+          <div className="account-copy"><strong>{auth.user.provider === "google" ? "Google-konto" : `@${auth.user.githubLogin}`}</strong><span>{auth.user.email}</span></div>
           <button className="button ghost" type="button" onClick={signOut}>Logga ut</button>
         </div>
       </header>
