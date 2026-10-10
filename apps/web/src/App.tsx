@@ -45,6 +45,7 @@ export function App() {
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [identities, setIdentities] = useState<LinkedIdentity[]>([]);
   const [unlinkBusy, setUnlinkBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [presets, setPresets] = useState<ScreenshotPresetsResponse | null>(null);
   const [form, setForm] = useState<ScreenshotFormState>(DEFAULT_FORM);
   const [busy, setBusy] = useState(false);
@@ -198,11 +199,12 @@ export function App() {
         </div>
         <div className="account">
           <div className="account-copy"><strong>{auth.user.provider === "google" ? "Google-konto" : `@${auth.user.githubLogin}`}</strong><span>{auth.user.email}</span></div>
+          <button className="button ghost" type="button" aria-expanded={settingsOpen} aria-controls="account-settings" onClick={() => setSettingsOpen(open => !open)}>Inställningar</button>
           <button className="button ghost" type="button" onClick={signOut}>Logga ut</button>
         </div>
       </header>
 
-      <section className="panel" aria-label="Inloggningskonton">
+      {settingsOpen && <section id="account-settings" className="panel" aria-label="Kontoinställningar">
         <div className="panel-heading">
           <h2>Inloggningskonton</h2>
           <p>Hantera vilka inloggningssätt som hör till ditt konto.</p>
@@ -211,14 +213,16 @@ export function App() {
           <strong>{identity.provider === 'google' ? 'Google' : 'GitHub'}</strong>
           {identity.email ? ` – ${identity.email}` : ''}
         </p>)}
-        {auth.user.provider !== 'google' && googleEnabled &&
+        {googleEnabled &&
           !identities.some(identity => identity.provider === 'google') &&
           <a className="button secondary" href="/auth/link/google">Koppla Google-konto</a>}
-        {auth.user.provider !== 'google' &&
+        {auth.user.provider === 'google' && !identities.some(identity => identity.provider === 'github') &&
+          <a className="button secondary" href="/auth/link/github">Koppla GitHub-konto</a>}
+        {identities.some(identity => identity.provider === 'github') &&
           identities.some(identity => identity.provider === 'google') &&
           <button type="button" className="button secondary" disabled={unlinkBusy}
             onClick={disconnectGoogle}>{unlinkBusy ? 'Kopplar bort…' : 'Koppla bort Google'}</button>}
-      </section>
+      </section>}
       <main className="workspace">
         <section className="panel controls-panel">
           <div className="panel-heading">
