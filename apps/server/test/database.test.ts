@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  assessIdentityLink,
   configuredAllowlistEmails,
   databaseConnectionString,
   isEmailAllowed,
@@ -139,5 +140,41 @@ describe('Linked identity isolation', () => {
     expect(query.mock.calls[0][0]).toContain('linked.user_id = current_identity.user_id');
     expect(query.mock.calls[0][0]).toContain('current_identity.provider_subject = $2');
     expect(query.mock.calls[0][1]).toEqual(['github', 'subject-1']);
+  });
+});
+
+describe('Safe account link assessment', () => {
+  const source = { provider: 'github' as const, subject: 'github-123' };
+  const target = { provider: 'google' as const, subject: 'google-456' };
+
+  it('requires explicit merge for two existing accounts, even if they share an email', async () => {
+    const query = vi.fn(async (...args: unknown[]) => {
+      void args;
+      return { rows: [
+        { provider: 'github', provider_subject: 'github-123', user_id: 'account-a' },
+        { provider: 'google', provider_subject: 'google-456', user_id: 'account-b' },
+      ], rowCount: 2 };
+    });
+    expect(await assessIdentityLink({ query } as never, source, target)).toEqual({ outcome: 'merge_required' });
+    expect(query.mock.calls[0][1]).toEqual(['github', 'github-123', 'google', 'google-456']);
+  });
+
+  it('recognizes identities already belonging to the same account', async () => {
+    const query = vi.fn(async (...args: unknown[]) => {
+      void args;
+      return { rows: [
+        { provider: 'github', provider_subject: 'github-123', user_id: 'account-a' },
+        { provider: 'google', provider_subject: 'google-456', user_id: 'account-a' },
+      ], rowCount: 2 };
+    });
+    expect(await assessIdentityLink({ query } as never, source, target)).toEqual({ outcome: 'already_linked' });
+  });
+
+  it('does not assume ownership when the target identity is missing', async () => {
+    const query = vi.fn(async (...args: unknown[]) => {
+      void args;
+      return { rows: [{ provider: 'github', provider_subject: 'github-123', user_id: 'account-a' }], rowCount: 1 };
+    });
+    expect(await assessIdentityLink({ query } as never, source, target)).toEqual({ outcome: 'target_not_found' });
   });
 });
