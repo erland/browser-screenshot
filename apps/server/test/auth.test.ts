@@ -161,3 +161,45 @@ describe('GitHub OAuth and allowlist', () => {
     await app.close();
   });
 });
+
+
+describe('Optional Google login routing', () => {
+  const googleConfig = {
+    ...config,
+    googleClientId: 'google-client-id',
+    googleClientSecret: 'google-client-secret',
+    googleAllowedEmails: ['allowed.user@example.test'],
+  };
+
+  it('does not expose Google when disabled', async () => {
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(config, createStore(), createGithub()) });
+    expect((await app.inject('/api/auth/providers')).json()).toEqual({ github: true, google: false });
+    expect((await app.inject('/auth/login/google')).statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('starts Google login with authorization code, PKCE, nonce and secure state cookie', async () => {
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(googleConfig, createStore(), createGithub()) });
+    expect((await app.inject('/api/auth/providers')).json()).toEqual({ github: true, google: true });
+    const start = await app.inject('/auth/login/google');
+    expect(start.statusCode).toBe(302);
+    const url = new URL(start.headers.location!);
+    expect(url.origin).toBe('https://accounts.google.com');
+    expect(url.searchParams.get('redirect_uri')).toBe('https://screenshots.example.test/auth/callback/google');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(url.searchParams.get('nonce')).toBeTruthy();
+    expect(url.searchParams.get('state')).toBeTruthy();
+    expect(start.headers['set-cookie']).toContain('Secure');
+    expect(start.headers['set-cookie']).toContain('HttpOnly');
+    await app.close();
+  });
+
+  it('rejects invalid Google callback state without exchanging code', async () => {
+    const app = await buildApp({ serveFrontend: false, auth: new AuthManager(googleConfig, createStore(), createGithub()) });
+    const response = await app.inject('/auth/callback/google?code=test&state=forged');
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('INVALID_OAUTH_STATE');
+    await app.close();
+  });
+});
