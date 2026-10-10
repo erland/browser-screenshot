@@ -475,3 +475,48 @@ export async function mergeVerifiedGithubAccount(
     return 'merged';
   });
 }
+
+/**
+ * An account is identified by its stable app_user.id, never by its login provider.
+ * Detach one verified login identity while retaining the account and at least
+ * one other login method. Lock the account to serialize concurrent removals.
+ */
+export async function unlinkAccountIdentity(
+  db: Pick<Database, 'transaction'>,
+  authenticated: { provider: 'github' | 'google'; subject: string },
+  removeProvider: 'github' | 'google'
+): Promise<'unlinked' | 'not_linked' | 'last_identity'> {
+  return db.transaction(async client => {
+    const owner = await client.query<{ user_id: string }>(
+      `SELECT user_id FROM app_user_identity
+       WHERE provider = $1 AND provider_subject = $2`,
+      [authenticated.provider, authenticated.subject]
+    );
+    if (!owner.rows[0]) return 'not_linked';
+    const userId = owner.rows[0].user_id;
+    await client.query('SELECT id FROM app_user WHERE id = $1 FOR UPDATE', [userId]);
+    const identities = await client.query<{ provider: string; provider_subject: string }>(
+      'SELECT provider, provider_subject FROM app_user_identity WHERE user_id = $1 FOR UPDATE',
+      [userId]
+    );
+    const target = identities.rows.find(identity => identity.provider === removeProvider);
+    if (!target) return 'not_linked';
+    if (identities.rows.length <= 1) return 'last_identity';
+    // Do not remove the identity authenticating this request: the user must
+    // sign in using the other linked provider first.
+    if (authenticated.provider === removeProvider) return 'last_identity';
+    await client.query(
+      'DELETE FROM oauth_authorization_code WHERE user_id = $1 AND identity_provider = $2 AND identity_subject = $3',
+      [userId, removeProvider, target.provider_subject]
+    );
+    await client.query(
+      'DELETE FROM oauth_refresh_token WHERE user_id = $1 AND identity_provider = $2 AND identity_subject = $3',
+      [userId, removeProvider, target.provider_subject]
+    );
+    await client.query(
+      'DELETE FROM app_user_identity WHERE user_id = $1 AND provider = $2 AND provider_subject = $3',
+      [userId, removeProvider, target.provider_subject]
+    );
+    return 'unlinked';
+  });
+}
