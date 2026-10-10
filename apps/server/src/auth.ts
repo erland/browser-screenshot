@@ -492,22 +492,35 @@ export class AuthManager {
       ? 'Den verifierade identiteten tillhör redan ett annat konto. Om du fortsätter behålls det konto du är inloggad på och kontona slås ihop. MCP-anslutningar kan behöva godkännas på nytt.'
       : 'Du kan logga in på samma konto med både GitHub och Google.';
     const button = isMerge ? 'Slå ihop konton' : 'Bekräfta koppling';
-    // All values inserted into HTML here are application-owned constants.
-    reply.header('cache-control', 'no-store').header('content-security-policy',
-      "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'")
+    // Static, application-owned text only; do not interpolate provider data into HTML.
+    reply.header('cache-control', 'no-store')
+      .header('content-security-policy',
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'")
       .type('text/html; charset=utf-8').send(
-      '<!doctype html><html lang="sv"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
-      '<title>Bekräfta kontoåtgärd</title><main style="max-width:32rem;margin:4rem auto;font:1rem system-ui;padding:1rem">' +
-      '<h1>' + heading + '</h1><p>' + explanation + '</p>' +
-      '<div style="display:flex;gap:1rem"><a href="/" id="cancel">Avbryt</a>' +
-      '<button id="confirm">' + button + '</button></div><p id="status" role="status"></p></main>' +
-      '<script>document.getElementById("confirm").onclick=async()=>{' +
-      'const r=await fetch("/api/account/link/google/confirm",{method:"POST",credentials:"same-origin",' +
+      '<!doctype html><html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+      '<title>Bekräfta kontoåtgärd · Browser Screenshot</title>' +
+      '<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at top,#f7f9ff,#eef2f7 60%);font:16px/1.55 system-ui,-apple-system,sans-serif;color:#243044}' +
+      'main{width:min(520px,100%);padding:clamp(24px,5vw,40px);background:#fff;border:1px solid #dce3ec;border-radius:20px;box-shadow:0 22px 60px rgb(30 41 59 / .09)}' +
+      'h1{font-size:clamp(25px,5vw,34px);line-height:1.15;margin:0 0 18px}p{color:#58657a;margin:0 0 24px}' +
+      '.actions{display:flex;gap:14px;flex-wrap:wrap;align-items:center}.button{display:inline-flex;justify-content:center;align-items:center;min-height:48px;padding:11px 20px;border-radius:10px;text-decoration:none;font:600 15px system-ui;cursor:pointer}' +
+      '.primary{border:1px solid #3555bb;background:#3555bb;color:white}.primary:hover{background:#29469d}.primary:disabled{opacity:.6;cursor:wait}' +
+      '.secondary{border:1px solid #cdd6e3;background:#fff;color:#27364c}#status{margin:20px 0 0;color:#a02727;white-space:pre-wrap}#status:empty{display:none}' +
+      '@media(max-width:420px){.actions{flex-direction:column-reverse;align-items:stretch}.button{width:100%}}</style></head>' +
+      '<body><main><h1>' + heading + '</h1><p>' + explanation + '</p>' +
+      '<div class="actions"><a class="button secondary" href="/">Avbryt</a>' +
+      '<button class="button primary" type="button" id="confirm">' + button + '</button></div>' +
+      '<p id="status" role="alert" aria-live="polite"></p></main>' +
+      '<script>(function(){const btn=document.getElementById("confirm");const status=document.getElementById("status");' +
+      'btn.addEventListener("click",async function(){btn.disabled=true;btn.textContent="Bearbetar…";status.textContent="";' +
+      'try{const r=await fetch("/api/account/link/google/confirm",{method:"POST",credentials:"same-origin",' +
       'headers:{"content-type":"application/json"},body:JSON.stringify({merge:' + String(isMerge) + '})});' +
       'if(r.ok){location.assign("/");return;}' +
-      'document.getElementById("status").textContent=r.status===409?' +
-      '"Kontona kunde inte slås ihop ännu. Inga ändringar gjordes.":' +
-      '"Åtgärden misslyckades. Inga ändringar har bekräftats."}</script></html>'
+      'const body=await r.json().catch(()=>null);const code=body&&body.error&&body.error.code;' +
+      'status.textContent=r.status===403?"Bekräftelsen kunde inte genomföras (403). Försök logga in igen.":' +
+      'r.status===409?"Kontona kunde inte kopplas ihop (409). Inga ändringar genomfördes.":' +
+      '"Kopplingen misslyckades ("+r.status+(code?", "+code:"")+"). Försök igen.";' +
+      '}catch(e){status.textContent="Kunde inte kontakta servern. Kontrollera anslutningen och försök igen."}' +
+      'finally{btn.disabled=false;btn.textContent=' + JSON.stringify(button) + ';}})})()</script></body></html>'
     );
   }
 

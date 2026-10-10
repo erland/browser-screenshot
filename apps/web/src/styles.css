@@ -190,3 +190,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 /* Give stacked login providers clear separation and comfortable touch targets. */
 .auth-card > a.button.full + a.button.full { margin-top: 0.85rem; }
 .auth-card > a.button.full { min-height: 48px; display: flex; align-items: center; justify-content: center; }
+
+/* Keep account actions clear of the final identity row and workspace below. */
+#account-settings > a.button, #account-settings > button.button { margin-top: 1rem; margin-bottom: .35rem; }
+#account-settings { margin: 1rem auto 1.5rem; }
