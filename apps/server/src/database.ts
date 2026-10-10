@@ -232,3 +232,29 @@ export async function listLinkedProviderIdentities(
     provider: row.provider, subject: row.provider_subject, email: row.verified_email
   }));
 }
+
+export type IdentityLinkAssessment =
+  | { outcome: 'source_not_found' | 'target_not_found' }
+  | { outcome: 'already_linked' | 'merge_required' };
+
+export async function assessIdentityLink(
+  db: Pick<Database, 'query'>,
+  source: { provider: 'github' | 'google'; subject: string },
+  target: { provider: 'github' | 'google'; subject: string }
+): Promise<IdentityLinkAssessment> {
+  // Identity ownership is always established by verified, immutable provider subjects.
+  // Matching emails never authorize linking or merging.
+  const result = await db.query<{ provider: string; provider_subject: string; user_id: string }>(
+    `SELECT provider, provider_subject, user_id FROM app_user_identity
+     WHERE (provider = $1 AND provider_subject = $2)
+        OR (provider = $3 AND provider_subject = $4)`,
+    [source.provider, source.subject, target.provider, target.subject]
+  );
+  const sourceAccount = result.rows.find(row =>
+    row.provider === source.provider && row.provider_subject === source.subject);
+  if (!sourceAccount) return { outcome: 'source_not_found' };
+  const targetAccount = result.rows.find(row =>
+    row.provider === target.provider && row.provider_subject === target.subject);
+  if (!targetAccount) return { outcome: 'target_not_found' };
+  return { outcome: sourceAccount.user_id === targetAccount.user_id ? 'already_linked' : 'merge_required' };
+}
