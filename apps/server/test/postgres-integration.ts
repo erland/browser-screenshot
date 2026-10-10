@@ -21,6 +21,24 @@ try {
   const identity = await pool.query<{ user_id: string }>(
     "SELECT user_id FROM app_user_identity WHERE provider='google' AND provider_subject=$1", [google]);
   assert.equal(identity.rows[0]?.user_id, source.id, 'Google identity uses GitHub account ID');
+  const transactionDb = {
+    transaction: async <T>(action: (client: typeof pool) => Promise<T>): Promise<T> => {
+      const connection = await pool.connect();
+      try {
+        await connection.query('BEGIN');
+        const result = await action(connection as unknown as typeof pool);
+        await connection.query('COMMIT');
+        return result;
+      } catch (error) {
+        await connection.query('ROLLBACK');
+        throw error;
+      } finally {
+        connection.release();
+      }
+    }
+  };
+  assert.equal(await mergeVerifiedGoogleAccount(transactionDb, github, google),
+    'already_linked', 'existing GitHub-Google link must be idempotent');
   // A later ordinary Google login must reuse the linked identity, not create
   // another app_user that owns the same Google subject.
   await upsertGoogleUser(pool, google, 'shared@example.test');
