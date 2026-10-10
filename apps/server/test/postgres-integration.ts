@@ -21,6 +21,15 @@ try {
   const identity = await pool.query<{ user_id: string }>(
     "SELECT user_id FROM app_user_identity WHERE provider='google' AND provider_subject=$1", [google]);
   assert.equal(identity.rows[0]?.user_id, source.id, 'Google identity uses GitHub account ID');
+  // A later ordinary Google login must reuse the linked identity, not create
+  // another app_user that owns the same Google subject.
+  await upsertGoogleUser(pool, google, 'shared@example.test');
+  const afterLogin = await pool.query<{ user_id: string }>(
+    "SELECT user_id FROM app_user_identity WHERE provider='google' AND provider_subject=$1", [google]);
+  assert.equal(afterLogin.rows[0]?.user_id, source.id, 'Google login preserves linked ownership');
+  const duplicateOwners = await pool.query(
+    "SELECT id FROM app_user WHERE provider='google' AND provider_subject=$1", [google]);
+  assert.equal(duplicateOwners.rowCount, 0, 'no ghost account created for linked Google login');
   const conflict = await linkUnclaimedGoogleIdentity(pool, github, googleOther, 'shared@example.test');
   assert.equal(conflict, 'merge_required', 'occupied Google subject must not move');
   const existing = await pool.query<{ user_id: string }>(
