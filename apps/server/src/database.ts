@@ -165,3 +165,35 @@ export async function isEmailAllowed(
   );
   return (result.rowCount ?? 0) > 0;
 }
+
+export async function upsertGoogleUser(
+  db: Pick<Database, 'query'>, subject: string, email: string
+): Promise<void> {
+  const id = randomUUID();
+  await db.query(
+    `INSERT INTO app_user (id, provider, provider_subject, github_login, email)
+     VALUES ($1, 'google', $2, NULL, $3)
+     ON CONFLICT (provider, provider_subject)
+     DO UPDATE SET email = EXCLUDED.email, updated_at = now()`,
+    [id, subject, email]
+  );
+  await db.query(
+    `INSERT INTO app_user_identity (user_id, provider, provider_subject, verified_email)
+     SELECT id, 'google', $1, $2 FROM app_user
+     WHERE provider = 'google' AND provider_subject = $1
+     ON CONFLICT (provider, provider_subject)
+     DO UPDATE SET verified_email = EXCLUDED.verified_email, updated_at = now()`,
+    [subject, email]
+  );
+}
+
+export async function isActiveGoogleIdentity(
+  db: Pick<Database, 'query'>, subject: string, email: string
+): Promise<boolean> {
+  const result = await db.query(
+    `SELECT 1 FROM app_user_identity
+     WHERE provider = 'google' AND provider_subject = $1 AND lower(verified_email) = $2`,
+    [subject, email.toLowerCase()]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
