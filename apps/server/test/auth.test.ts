@@ -235,3 +235,25 @@ describe('Linked account identities endpoint', () => {
     await app.close();
   });
 });
+
+
+describe('Google link verification initiation', () => {
+  it('requires an existing authenticated GitHub session', async () => {
+    const auth = new AuthManager({
+      ...config, googleClientId: 'google-id', googleClientSecret: 'google-secret',
+      googleAllowedEmails: ['allowed.user@example.test']
+    }, createStore(), createGithub());
+    const app = await buildApp({ serveFrontend: false, auth });
+    const anonymous = await app.inject('/auth/link/google');
+    expect(anonymous.statusCode).toBe(401);
+    const session = await login(app);
+    const start = await app.inject({ url: '/auth/link/google', method: 'GET',
+      headers: { cookie: `browser_screenshot_session=${encodeURIComponent(session)}` } });
+    expect(start.statusCode).toBe(302);
+    const url = new URL(start.headers.location!);
+    expect(url.hostname).toBe('accounts.google.com');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(start.headers['set-cookie']).toContain('browser_screenshot_google_state');
+    await app.close();
+  });
+});
