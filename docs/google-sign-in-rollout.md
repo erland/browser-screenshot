@@ -75,3 +75,6 @@ The database now provides `assessIdentityLink(source, target)` using immutable p
 
 ## Explicit Google account-link confirmation (current checkpoint)
 After a fresh Google verification, `/auth/callback/google` now sets a short-lived, signed, HttpOnly confirmation cookie bound to the current GitHub subject and redirects to `/auth/link/confirm`. The user must explicitly click to send a same-origin POST to `/api/account/link/google/confirm`. The server rechecks the browser session, signed confirmation, configured Google allowlist, and invokes the insert-only link operation. Any previously owned Google identity causes a conflict, not automatic merging. The link confirmation does not implement account merges or unlinking, and requires end-to-end browser and PostgreSQL testing before deployment.
+
+## Google unlinking checkpoint
+`POST /api/account/unlink/google` now requires a live GitHub session and same-origin request. It removes only the Google provider identity from that same account, leaving GitHub available for login. Existing identity-bound Google MCP bearer and refresh credentials are rejected at provider-identity validation after the unlink. This does **not** implement explicit account merging or browser-UI unlink confirmation. Review the lifecycle of standalone Google records and run real PostgreSQL integration tests before merging.
