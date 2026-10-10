@@ -1,10 +1,11 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
-import { isActiveGoogleIdentity, isEmailAllowed, listLinkedProviderIdentities, upsertGithubUser, upsertGoogleUser } from './database.js';
+import { isActiveGoogleIdentity, isEmailAllowed, linkUnclaimedGoogleIdentity, listLinkedProviderIdentities, upsertGithubUser, upsertGoogleUser } from './database.js';
 
 import { exchangeGoogleCode, googlePkceChallenge, verifyGoogleIdToken } from './google-oidc.js';
 
+const LINK_PENDING_COOKIE = 'browser_screenshot_link_pending';
 const GOOGLE_STATE_COOKIE = 'browser_screenshot_google_state';
 const SESSION_COOKIE = 'browser_screenshot_session';
 const OAUTH_STATE_COOKIE = 'browser_screenshot_oauth_state';
@@ -44,6 +45,7 @@ export type AuthStore = {
   upsertGoogle?(subject: string, email: string): Promise<void>;
   googleIsActive?(subject: string, email: string): Promise<boolean>;
   listIdentities?(provider: 'github' | 'google', subject: string): Promise<{ provider: 'github' | 'google'; email: string | null }[]>;
+  linkGoogle?(githubSubject: string, googleSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
 };
 
 export type AuthConfig = {
@@ -183,6 +185,7 @@ export function createDatabaseAuthStore(database: Pick<Database, 'query'>): Auth
     upsertGoogle: (subject, email) => upsertGoogleUser(database, subject, email),
     googleIsActive: (subject, email) => isActiveGoogleIdentity(database, subject, email),
     listIdentities: (provider, subject) => listLinkedProviderIdentities(database, provider, subject),
+    linkGoogle: (githubSubject, googleSubject, email) => linkUnclaimedGoogleIdentity(database, githubSubject, googleSubject, email),
   };
 }
 
@@ -338,10 +341,12 @@ export class AuthManager {
         }
         // Fresh Google verification completed. No account is moved at this stage:
         // explicit conflict assessment and consent must precede any mutation.
-        reply.header('cache-control', 'no-store').code(409).send({
-          error: { code: 'LINK_CONFIRMATION_REQUIRED',
-            message: 'Google identity verified. Account linking requires a separate confirmation step.' }
-        });
+        const pending = signPayload({
+          githubSubject: current.githubUserId, googleSubject: identity.subject,
+          email: identity.email, exp: Math.floor(Date.now() / 1000) + STATE_TTL_SECONDS
+        }, this.config.sessionSecret);
+        reply.headers({ 'set-cookie': serializeCookie(LINK_PENDING_COOKIE, pending, STATE_TTL_SECONDS),
+          'cache-control': 'no-store' }).redirect('/auth/link/confirm');
         return;
       }
       if (!this.store.upsertGoogle) throw new Error('Google identity store unavailable');
@@ -354,6 +359,60 @@ export class AuthManager {
     } catch {
       reply.code(502).send({ error: { code: 'OAUTH_PROVIDER_ERROR', message: 'Google authentication failed' } });
     }
+  }
+
+  async confirmGoogleLink(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const user = await this.authenticate(request, reply);
+    if (!user) return;
+    const origin = request.headers.origin;
+    if (origin !== this.config.publicBaseUrl) {
+      reply.code(403).send({ error: { code: 'INVALID_ORIGIN', message: 'Same-origin confirmation is required.' } });
+      return;
+    }
+    const pendingCookie = parseCookies(request.headers.cookie)[LINK_PENDING_COOKIE];
+    const pending = pendingCookie ? verifyPayload<SignedPayload & {
+      githubSubject: string; googleSubject: string; email: string
+    }>(pendingCookie, this.config.sessionSecret) : null;
+    reply.header('set-cookie', clearCookie(LINK_PENDING_COOKIE)).header('cache-control', 'no-store');
+    if (!pending || user.provider !== 'github' || pending.githubSubject !== user.githubUserId ||
+        typeof pending.googleSubject !== 'string' || typeof pending.email !== 'string' ||
+        !this.config.googleAllowedEmails?.includes(pending.email)) {
+      reply.code(403).send({ error: { code: 'INVALID_LINK_CONFIRMATION', message: 'Link confirmation expired or invalid.' } });
+      return;
+    }
+    if (!this.store.linkGoogle) {
+      reply.code(503).send({ error: { code: 'LINK_UNAVAILABLE' } });
+      return;
+    }
+    const outcome = await this.store.linkGoogle(user.githubUserId, pending.googleSubject, pending.email);
+    if (outcome === 'linked' || outcome === 'already_linked') {
+      reply.send({ status: outcome });
+      return;
+    }
+    reply.code(409).send({ error: { code: outcome === 'merge_required' ? 'MERGE_REQUIRED' : 'LINK_SOURCE_NOT_FOUND',
+      message: 'The identity cannot be linked automatically.' } });
+  }
+
+  async showGoogleLinkConfirmation(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const user = await this.authenticate(request, reply);
+    if (!user) return;
+    const cookie = parseCookies(request.headers.cookie)[LINK_PENDING_COOKIE];
+    const pending = cookie ? verifyPayload<SignedPayload & {
+      githubSubject: string; googleSubject: string; email: string
+    }>(cookie, this.config.sessionSecret) : null;
+    if (!pending || user.provider !== 'github' || pending.githubSubject !== user.githubUserId) {
+      reply.code(403).type('text/plain').send('Link confirmation expired.'); return;
+    }
+    reply.header('cache-control', 'no-store').type('text/html; charset=utf-8').send(
+      '<!doctype html><html lang="sv"><meta charset="utf-8"><title>Bekräfta kontokoppling</title>' +
+      '<main><h1>Koppla Google till GitHub-kontot?</h1>' +
+      '<p>En ny Google-verifiering har genomförts. Om Google-identiteten redan tillhör ett annat konto krävs separat sammanslagning.</p>' +
+      '<button id="confirm">Bekräfta koppling</button><p id="status"></p></main>' +
+      '<script>document.getElementById("confirm").onclick=async()=>{' +
+      'const r=await fetch("/api/account/link/google/confirm",{method:"POST",credentials:"same-origin"});' +
+      'document.getElementById("status").textContent=r.ok?"Kontot är kopplat.":' +
+      '"Koppling kunde inte slutföras. Ett annat konto kan redan äga identiteten."}</script></html>'
+    );
   }
 
   async getLinkedIdentities(request: FastifyRequest, reply: FastifyReply): Promise<void> {
