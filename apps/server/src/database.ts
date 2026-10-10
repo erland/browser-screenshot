@@ -502,8 +502,12 @@ export async function unlinkAccountIdentity(
     const target = identities.rows.find(identity => identity.provider === removeProvider);
     if (!target) return 'not_linked';
     if (identities.rows.length <= 1) return 'last_identity';
-    // Do not remove the identity authenticating this request: the user must
-    // sign in using the other linked provider first.
+    // Until the legacy app_user(provider, provider_subject) ownership fields
+    // are migrated, detaching that historical owner would allow an old login
+    // to recreate a link to the same account. Fail closed instead.
+    const legacy = await client.query<{ provider: string; provider_subject: string }>(
+      'SELECT provider, provider_subject FROM app_user WHERE id = $1', [userId]);
+    if (legacy.rows[0]?.provider === removeProvider) return 'last_identity';
     if (authenticated.provider === removeProvider) return 'last_identity';
     await client.query(
       'DELETE FROM oauth_authorization_code WHERE user_id = $1 AND identity_provider = $2 AND identity_subject = $3',
