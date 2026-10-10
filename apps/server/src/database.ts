@@ -159,6 +159,20 @@ export async function upsertGithubUser(
   db: Pick<Database, 'query'>,
   input: { providerSubject: string; githubLogin: string; email?: string | null }
 ): Promise<{ id: string }> {
+  // An already-linked GitHub subject belongs to its existing internal account,
+  // regardless of which provider originally created that account.
+  const linked = await db.query<{ user_id: string }>(
+    `UPDATE app_user_identity SET verified_email = $2, updated_at = now()
+     WHERE provider = 'github' AND provider_subject = $1 RETURNING user_id`,
+    [input.providerSubject, input.email?.toLowerCase() ?? null]
+  );
+  if (linked.rows[0]) {
+    await db.query(
+      'UPDATE app_user SET github_login = $2, updated_at = now() WHERE id = $1',
+      [linked.rows[0].user_id, input.githubLogin]
+    );
+    return { id: linked.rows[0].user_id };
+  }
   const id = randomUUID();
   const result = await db.query<{ id: string }>(
     `INSERT INTO app_user (id, provider, provider_subject, github_login, email)
@@ -217,6 +231,17 @@ export async function upsertGoogleUser(
      DO UPDATE SET verified_email = EXCLUDED.verified_email, updated_at = now()`,
     [subject, email]
   );
+}
+
+export async function isActiveGithubIdentity(
+  db: Pick<Database, 'query'>, subject: string, email: string
+): Promise<boolean> {
+  const result = await db.query(
+    `SELECT 1 FROM app_user_identity
+     WHERE provider = 'github' AND provider_subject = $1 AND lower(verified_email) = $2`,
+    [subject, email.toLowerCase()]
+  );
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function isActiveGoogleIdentity(
