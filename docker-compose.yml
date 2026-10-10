@@ -25,6 +25,9 @@ services:
       DATABASE_URL: postgresql://browser_screenshot:browser_screenshot@postgres:5432/browser_screenshot
       GITHUB_CLIENT_ID: local-dev-placeholder
       GITHUB_CLIENT_SECRET: local-dev-placeholder
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      BROWSER_SCREENSHOT_GOOGLE_ALLOWLIST_EMAILS: "${BROWSER_SCREENSHOT_GOOGLE_ALLOWLIST_EMAILS:-}"
       SESSION_SECRET: local-dev-session-secret-32-characters-minimum
       MCP_TOKEN_SECRET: local-dev-mcp-token-secret-32-characters-minimum
     ports:
