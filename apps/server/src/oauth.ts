@@ -28,6 +28,7 @@ export type OAuthCodeRecord = {
   codeChallenge: string;
   scope: string;
   resource: string;
+  identity?: VerifiedMcpIdentity;
 };
 
 export type McpAccessToken = {
@@ -36,9 +37,10 @@ export type McpAccessToken = {
   scopes: string[];
   resource: string;
   exp: number;
+  identity?: VerifiedMcpIdentity;
 };
 
-export type OAuthRefreshRecord = { clientId: string; email: string; scope: string; resource: string };
+export type OAuthRefreshRecord = { clientId: string; email: string; scope: string; resource: string; identity?: VerifiedMcpIdentity };
 
 export type VerifiedMcpIdentity = { userId: string; provider: 'github' | 'google'; subject: string; email: string };
 
@@ -49,6 +51,7 @@ export interface OAuthStore {
   consumeAuthorizationCode(code: string): Promise<OAuthCodeRecord | null>;
   isAllowed(email: string): Promise<boolean>;
   resolveIdentity?(provider: 'github' | 'google', subject: string, email: string): Promise<VerifiedMcpIdentity | null>;
+  validateIdentity?(identity: VerifiedMcpIdentity): Promise<boolean>;
   saveRefreshToken(hash: string, record: OAuthRefreshRecord, expiresAt: Date): Promise<void>;
   consumeRefreshToken(hash: string, clientId: string): Promise<OAuthRefreshRecord | null>;
 }
@@ -185,6 +188,13 @@ export function createDatabaseOAuthStore(db: Pick<Database, 'query'>): OAuthStor
       return row ? { clientId: row.client_id, email: row.email, scope: row.scope, resource: row.resource } : null;
     },
     isAllowed: (email) => isEmailAllowed(db, email),
+    async validateIdentity(identity) {
+      const resolved = await this.resolveIdentity?.(identity.provider, identity.subject, identity.email);
+      if (!resolved || resolved.userId !== identity.userId) return false;
+      if (identity.provider === 'github') return isEmailAllowed(db, identity.email);
+      const allowlist = (process.env.BROWSER_SCREENSHOT_GOOGLE_ALLOWLIST_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase());
+      return allowlist.includes(identity.email);
+    },
     async resolveIdentity(provider, subject, email) {
       const result = await db.query<{ user_id: string; verified_email: string }>(
         `SELECT i.user_id, i.verified_email FROM app_user_identity i
@@ -314,7 +324,10 @@ export class McpOAuthManager {
       return;
     }
 
+    const identity = user.githubUserId && this.store.resolveIdentity
+      ? await this.store.resolveIdentity('github', user.githubUserId, user.email) : null;
     const code = await this.store.createAuthorizationCode({
+      ...(identity ? { identity } : {}),
       clientId,
       redirectUri,
       email: user.email,
@@ -332,7 +345,8 @@ export class McpOAuthManager {
   private async issueTokenPair(reply: FastifyReply, record: OAuthRefreshRecord, predecessor?: string): Promise<void> {
     const exp = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL_SECONDS;
     const accessToken = signToken({
-      email: record.email, clientId: record.clientId, scopes: [MCP_SCOPE], resource: record.resource, exp
+      email: record.email, clientId: record.clientId, scopes: [MCP_SCOPE], resource: record.resource, exp,
+      ...(record.identity ? { identity: record.identity } : {})
     }, this.config.tokenSecret);
     const refreshToken = predecessor
       ? createHmac('sha256', this.config.tokenSecret).update('oauth-refresh-successor-v1:').update(predecessor).digest('base64url')
@@ -403,7 +417,9 @@ export class McpOAuthManager {
     if (!header?.startsWith('Bearer ') || header.length > 8192) return null;
     const payload = verifySignedToken(header.slice('Bearer '.length), this.config.tokenSecret);
     if (!payload || payload.resource !== this.resource || !payload.scopes.includes(MCP_SCOPE)) return null;
-    if (!(await this.store.isAllowed(payload.email))) return null;
+    if (payload.identity) {
+      if (!this.store.validateIdentity || !(await this.store.validateIdentity(payload.identity))) return null;
+    } else if (!(await this.store.isAllowed(payload.email))) return null;
     return payload;
   }
 }
