@@ -35,7 +35,32 @@ try {
   const existing = await pool.query<{ user_id: string }>(
     "SELECT user_id FROM app_user_identity WHERE provider='google' AND provider_subject=$1", [googleOther]);
   assert.notEqual(existing.rows[0]?.user_id, source.id, 'no account takeover via shared email');
+  const clientId = 'test-client-' + randomUUID();
+  await pool.query(
+    'INSERT INTO oauth_client (client_id, redirect_uris) VALUES ($1, $2)',
+    [clientId, '["https://example.test/callback"]']);
+  await pool.query(
+    `INSERT INTO oauth_refresh_token
+      (token_hash, client_id, email, scope, resource, expires_at, user_id, identity_provider, identity_subject)
+     VALUES ($1, $2, $3, 'mcp', 'https://example.test/mcp', now() + interval '1 day', $4, 'google', $5)`,
+    ['refresh-' + randomUUID(), clientId, 'shared@example.test', source.id, google]);
+  await pool.query(
+    `INSERT INTO oauth_authorization_code
+      (code_hash, client_id, redirect_uri, email, code_challenge, scope, resource, expires_at,
+       user_id, identity_provider, identity_subject)
+     VALUES ($1, $2, 'https://example.test/callback', $3, 'challenge', 'mcp',
+       'https://example.test/mcp', now() + interval '5 minutes', $4, 'google', $5)`,
+    ['code-' + randomUUID(), clientId, 'shared@example.test', source.id, google]);
   const unlinked = await unlinkGoogleFromGithubAccount(pool, github);
+  const revokedRefresh = await pool.query(
+    "SELECT 1 FROM oauth_refresh_token WHERE identity_provider='google' AND identity_subject=$1",
+    [google]);
+  assert.equal(revokedRefresh.rowCount, 0, 'unlinked Google refresh credentials revoked');
+  const revokedCodes = await pool.query(
+    "SELECT 1 FROM oauth_authorization_code WHERE identity_provider='google' AND identity_subject=$1",
+    [google]);
+  assert.equal(revokedCodes.rowCount, 0, 'unlinked Google authorization codes revoked');
+
   assert.equal(unlinked, 'unlinked');
   const googleAfter = await pool.query("SELECT 1 FROM app_user_identity WHERE provider='google' AND provider_subject=$1", [google]);
   assert.equal(googleAfter.rowCount, 0);
