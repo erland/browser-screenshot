@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Database } from './database.js';
 import { isActiveGoogleIdentity, isEmailAllowed, upsertGithubUser, upsertGoogleUser } from './database.js';
@@ -199,7 +199,7 @@ export function loadAuthConfig(env = process.env): AuthConfig {
   const googleClientSecret = env.GOOGLE_CLIENT_SECRET?.trim();
   if (Boolean(googleClientId) !== Boolean(googleClientSecret)) throw new Error('Both Google OAuth settings are required');
   const googleAllowedEmails = (env.BROWSER_SCREENSHOT_GOOGLE_ALLOWLIST_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean);
-  if (googleAllowedEmails.some(email => !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email))) throw new Error('Invalid Google allowlist email');
+  if (googleAllowedEmails.some(email => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))) throw new Error('Invalid Google allowlist email');
   return { clientId, clientSecret, sessionSecret, publicBaseUrl: parsed.origin,
     googleClientId, googleClientSecret, googleAllowedEmails };
 }
