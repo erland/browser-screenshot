@@ -63,3 +63,6 @@ Earlier sections describing the temporary Google MCP block document historical r
 An authenticated endpoint, `GET /api/account/identities`, now lists provider names and verified emails linked to the *same* internal user ID. It resolves the requesting session by provider and immutable subject; it does not use matching email as a linkage rule. Provider subject identifiers are deliberately omitted from the browser response.
 
 **Not implemented:** mutation routes for linking, unlinking or merging accounts. Before adding these, require fresh OAuth verification, same-origin protection for mutations, atomic account ownership checks and reliable invalidation of browser sessions and MCP credentials after changes. Do not present the read-only endpoint as complete account linking.
+
+## Explicit account merge assessment
+The database now provides `assessIdentityLink(source, target)` using immutable provider subjects. It reports missing identities, already-linked identities, or `merge_required` when the two verified identities belong to different internal accounts. It **does not** link, merge, migrate data or revoke sessions. Linking must later require fresh verification of both identities, explicit merge consent, and transactional record/token handling. Email equality never approves a merge.
