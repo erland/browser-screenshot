@@ -28,6 +28,7 @@ describe('database migrations', () => {
       { version: '004_mcp_refresh_token' },
       { version: '005_mcp_refresh_retry' },
       { version: '006_external_identities' },
+      { version: '007_google_accounts' },
     ]);
     await pool.end();
   });
