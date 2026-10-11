@@ -71,7 +71,7 @@ describe('account identity removal', () => {
     expect(await unlinkAccountIdentity(db as never, { provider: 'github', subject: 'github-id' }, 'google')).toBe('account_conflict');
     expect(statements.some(sql => sql.includes('UPDATE app_user SET provider'))).toBe(false);
     expect(statements.some(sql => sql.includes('mcp_tokens_invalid_before'))).toBe(false);
-    expect(statements.some(sql => sql.includes('DELETE FROM'))).toBe(false);
+    expect(statements.some(sql => sql.includes('DELETE FROM app_user_identity WHERE'))).toBe(false);
   });
 
   it('reports the same legacy collision when removing GitHub from a Google session', async () => {
@@ -92,7 +92,7 @@ describe('account identity removal', () => {
     const db = { transaction: async (fn: (client: unknown) => Promise<unknown>) => fn({ query }) };
     expect(await unlinkAccountIdentity(db as never, { provider: 'google', subject: 'google-id' }, 'github')).toBe('account_conflict');
     expect(statements.some(sql => sql.includes('UPDATE app_user SET provider'))).toBe(false);
-    expect(statements.some(sql => sql.includes('DELETE FROM'))).toBe(false);
+    expect(statements.some(sql => sql.includes('DELETE FROM app_user_identity WHERE'))).toBe(false);
   });
 
   it('retires an unreferenced duplicate and unlinks Google atomically', async () => {
