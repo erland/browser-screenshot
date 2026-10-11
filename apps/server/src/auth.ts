@@ -50,7 +50,7 @@ export type AuthStore = {
   linkGithub?(googleSubject: string, githubSubject: string, email: string): Promise<'linked' | 'already_linked' | 'merge_required' | 'source_not_found'>;
   mergeGithub?(googleSubject: string, githubSubject: string): Promise<'merged' | 'already_linked' | 'not_mergeable'>;
   unlinkGoogle?(githubSubject: string): Promise<'unlinked' | 'not_linked'>;
-  unlinkIdentity?(authenticated: { provider: 'github' | 'google'; subject: string }, removeProvider: 'github' | 'google'): Promise<'unlinked' | 'not_linked' | 'last_identity'>;
+  unlinkIdentity?(authenticated: { provider: 'github' | 'google'; subject: string }, removeProvider: 'github' | 'google'): Promise<'unlinked' | 'not_linked' | 'last_identity' | 'account_conflict'>;
   assessLink?(githubSubject: string, googleSubject: string): Promise<'already_linked' | 'merge_required' | 'source_not_found' | 'target_not_found'>;
   mergeGoogle?(githubSubject: string, googleSubject: string): Promise<'merged' | 'already_linked' | 'not_mergeable'>;
 };
@@ -551,6 +551,9 @@ export class AuthManager {
     }
     if (outcome === 'not_linked') {
       reply.code(404).send({ error: { code: 'IDENTITY_NOT_LINKED' } }); return;
+    }
+    if (outcome === 'account_conflict') {
+      reply.code(409).send({ error: { code: 'ACCOUNT_IDENTITY_CONFLICT', message: 'The retained sign-in identity also has a separate legacy account. Account reconciliation is required before unlinking.' } }); return;
     }
     reply.send({ status: 'unlinked' });
   }
