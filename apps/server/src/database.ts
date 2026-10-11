@@ -511,7 +511,7 @@ export async function unlinkAccountIdentity(
   db: Pick<Database, 'transaction'>,
   authenticated: { provider: 'github' | 'google'; subject: string },
   removeProvider: 'github' | 'google'
-): Promise<'unlinked' | 'not_linked' | 'last_identity'> {
+): Promise<'unlinked' | 'not_linked' | 'last_identity' | 'account_conflict'> {
   return db.transaction(async client => {
     const owner = await client.query<{ user_id: string }>(
       `SELECT user_id FROM app_user_identity
@@ -540,6 +540,30 @@ export async function unlinkAccountIdentity(
     if (legacy.rows[0]?.provider === removeProvider) {
       const retained = identities.rows.find(identity => identity.provider !== removeProvider);
       if (!retained) return 'last_identity';
+      // A legacy standalone account can still own the retained provider key.
+      // Never overwrite or delete that account implicitly: it may hold user data.
+      const collision = await client.query<{ id: string }>(
+        'SELECT id FROM app_user WHERE provider = $1 AND provider_subject = $2 AND id <> $3 FOR UPDATE',
+        [retained.provider, retained.provider_subject, userId]
+      );
+      if (collision.rows.length > 0) {
+        // A historical login/upsert may have left an extra app_user with
+        // this provider key after the identity was linked to another account.
+        // Retire only a demonstrably unreferenced row, with a fixed provider
+        // key and no identities or OAuth grants. Foreign keys provide an
+        // additional safeguard against deleting accounts with dependent data.
+        const orphan = await client.query<{ id: string }>(
+          `DELETE FROM app_user orphan
+           WHERE orphan.id = $1
+             AND orphan.provider = $2 AND orphan.provider_subject = $3
+             AND NOT EXISTS (SELECT 1 FROM app_user_identity i WHERE i.user_id = orphan.id)
+             AND NOT EXISTS (SELECT 1 FROM oauth_authorization_code c WHERE c.user_id = orphan.id)
+             AND NOT EXISTS (SELECT 1 FROM oauth_refresh_token t WHERE t.user_id = orphan.id)
+           RETURNING id`,
+          [collision.rows[0].id, retained.provider, retained.provider_subject]
+        );
+        if (collision.rows.length !== 1 || orphan.rows.length !== 1) return 'account_conflict';
+      }
       await client.query(
         `UPDATE app_user SET provider = $2, provider_subject = $3,
            github_login = CASE WHEN $2 = 'github' THEN github_login ELSE NULL END,
