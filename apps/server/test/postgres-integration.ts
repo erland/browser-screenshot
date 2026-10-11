@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { runMigrations, upsertGithubUser, upsertGoogleUser,
-  linkUnclaimedGoogleIdentity, mergeVerifiedGoogleAccount, unlinkGoogleFromGithubAccount } from '../src/database.js';
+  linkUnclaimedGoogleIdentity, linkUnclaimedGithubIdentity, mergeVerifiedGoogleAccount, unlinkGoogleFromGithubAccount, unlinkAccountIdentity } from '../src/database.js';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 try {
@@ -144,6 +144,59 @@ try {
       }
     }
   }, mergeGithub, mergeGoogle), 'already_linked');
+  // Reproduce the production collision on real PostgreSQL:
+  // the verified GitHub identity is linked to a Google-owned account, while
+  // an unreferenced legacy row independently owns the GitHub provider key.
+  const collisionGoogle = 'collision-google-' + randomUUID();
+  const collisionGithub = 'collision-github-' + randomUUID();
+  await upsertGoogleUser(pool, collisionGoogle, 'collision@example.test');
+  const canonical = await pool.query<{ user_id: string }>(
+    "SELECT user_id FROM app_user_identity WHERE provider='google' AND provider_subject=$1",
+    [collisionGoogle]);
+  const canonicalId = canonical.rows[0].user_id;
+  assert.equal(await linkUnclaimedGithubIdentity(pool, collisionGoogle, collisionGithub, 'collision@example.test'), 'linked');
+  const legacyId = randomUUID();
+  await pool.query(
+    "INSERT INTO app_user (id, provider, provider_subject, github_login) VALUES ($1, 'github', $2, $3)",
+    [legacyId, collisionGithub, collisionGithub]);
+  assert.equal(await unlinkAccountIdentity(transactionDb,
+    { provider: 'github', subject: collisionGithub }, 'google'), 'unlinked');
+  assert.equal((await pool.query('SELECT id FROM app_user WHERE id=$1', [legacyId])).rowCount, 0,
+    'unreferenced legacy duplicate retired in same transaction');
+  const canonicalAfter = await pool.query<{ provider: string; provider_subject: string }>(
+    'SELECT provider, provider_subject FROM app_user WHERE id=$1', [canonicalId]);
+  assert.equal(canonicalAfter.rows[0]?.provider, 'github', 'canonical account switched to retained provider');
+  assert.equal(canonicalAfter.rows[0]?.provider_subject, collisionGithub);
+  assert.equal((await pool.query(
+    "SELECT 1 FROM app_user_identity WHERE user_id=$1 AND provider='github'", [canonicalId])).rowCount, 1);
+  assert.equal((await pool.query(
+    "SELECT 1 FROM app_user_identity WHERE user_id=$1 AND provider='google'", [canonicalId])).rowCount, 0);
+  assert.equal((await upsertGithubUser(pool, {
+    providerSubject: collisionGithub, githubLogin: collisionGithub, email: 'collision@example.test'
+  })).id, canonicalId, 'later GitHub login must not recreate a duplicate');
+
+  // A legacy row carrying an OAuth grant must not be deleted automatically.
+  const protectedGoogle = 'protected-google-' + randomUUID();
+  const protectedGithub = 'protected-github-' + randomUUID();
+  await upsertGoogleUser(pool, protectedGoogle, 'protected@example.test');
+  assert.equal(await linkUnclaimedGithubIdentity(pool, protectedGoogle, protectedGithub, 'protected@example.test'), 'linked');
+  const protectedLegacyId = randomUUID();
+  await pool.query(
+    "INSERT INTO app_user (id, provider, provider_subject, github_login) VALUES ($1, 'github', $2, $3)",
+    [protectedLegacyId, protectedGithub, protectedGithub]);
+  await pool.query(
+    `INSERT INTO oauth_refresh_token
+     (token_hash,client_id,email,scope,resource,expires_at,user_id,identity_provider,identity_subject)
+     VALUES ($1,$2,'protected@example.test','mcp','https://example.test/mcp',
+       now() + interval '1 day',$3,'github',$4)`,
+    ['protected-token-' + randomUUID(), clientId, protectedLegacyId, protectedGithub]);
+  assert.equal(await unlinkAccountIdentity(transactionDb,
+    { provider: 'github', subject: protectedGithub }, 'google'), 'account_conflict');
+  assert.equal((await pool.query('SELECT id FROM app_user WHERE id=$1', [protectedLegacyId])).rowCount, 1,
+    'legacy account with grant remains untouched');
+  assert.equal((await pool.query(
+    "SELECT 1 FROM app_user_identity WHERE provider='google' AND provider_subject=$1",
+    [protectedGoogle])).rowCount, 1, 'conflicted unlink does not remove Google identity');
   console.log('PostgreSQL identity integration checks passed');
 } finally {
   await pool.end();
