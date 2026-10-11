@@ -52,6 +52,28 @@ describe('account identity removal', () => {
     expect(statements.some(sql => sql.includes('DELETE FROM app_user_identity WHERE'))).toBe(true);
   });
 
+  it('safely reports an existing legacy owner', async () => {
+    const statements: string[] = [];
+    const query = vi.fn(async (sql: string) => {
+      statements.push(sql);
+      if (sql.includes('SELECT user_id FROM app_user_identity')) return { rows: [{ user_id: 'linked-account' }] };
+      if (sql.includes('SELECT provider, provider_subject FROM app_user_identity')) return { rows: [
+        { provider: 'github', provider_subject: 'github-id' },
+        { provider: 'google', provider_subject: 'google-id' }
+      ] };
+      if (sql.includes('SELECT provider, provider_subject FROM app_user WHERE')) return { rows: [
+        { provider: 'google', provider_subject: 'google-id' }
+      ] };
+      if (sql.includes('SELECT id FROM app_user WHERE provider')) return { rows: [{ id: 'legacy-account' }] };
+      return { rows: [] };
+    });
+    const db = { transaction: async (fn: (client: unknown) => Promise<unknown>) => fn({ query }) };
+    expect(await unlinkAccountIdentity(db as never, { provider: 'github', subject: 'github-id' }, 'google')).toBe('account_conflict');
+    expect(statements.some(sql => sql.includes('UPDATE app_user SET provider'))).toBe(false);
+    expect(statements.some(sql => sql.includes('mcp_tokens_invalid_before'))).toBe(false);
+    expect(statements.some(sql => sql.includes('DELETE FROM'))).toBe(false);
+  });
+
   it('rejects removing the identity used by the current session', async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql.includes('SELECT user_id FROM app_user_identity')) return { rows: [{ user_id: 'account-id' }] };
