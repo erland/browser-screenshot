@@ -546,22 +546,13 @@ export async function unlinkAccountIdentity(
         'SELECT id FROM app_user WHERE provider = $1 AND provider_subject = $2 AND id <> $3 FOR UPDATE',
         [retained.provider, retained.provider_subject, userId]
       );
-      if (collision.rows.length > 0) {
-        // The retained provider identity already belongs to this user through
-        // app_user_identity. Keep both legacy account rows intact; clear only
-        // the obsolete legacy owner key to avoid its unique constraint.
-        await client.query(
-          'UPDATE app_user SET provider_subject = NULL, github_login = NULL, updated_at = now() WHERE id = $1',
-          [userId]
-        );
-      } else {
+      if (collision.rows.length > 0) return 'account_conflict';
       await client.query(
         `UPDATE app_user SET provider = $2, provider_subject = $3,
            github_login = CASE WHEN $2 = 'github' THEN github_login ELSE NULL END,
            updated_at = now() WHERE id = $1`,
         [userId, retained.provider, retained.provider_subject]
       );
-      }
     }
     // Revoke legacy account-scoped MCP tokens as well as provider-bound grants.
     await client.query('UPDATE app_user SET mcp_tokens_invalid_before = clock_timestamp() WHERE id = $1', [userId]);
