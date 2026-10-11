@@ -35,6 +35,6 @@ SELECT con.conrelid::regclass AS referencing_table,
 FROM pg_constraint con
 WHERE con.contype = 'f'
   AND con.confrelid = 'app_user'::regclass
-ORDER BY referencing_table::text, constraint_name;
+ORDER BY 1, 2;
 
 ROLLBACK;
