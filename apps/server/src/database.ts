@@ -511,7 +511,7 @@ export async function unlinkAccountIdentity(
   db: Pick<Database, 'transaction'>,
   authenticated: { provider: 'github' | 'google'; subject: string },
   removeProvider: 'github' | 'google'
-): Promise<'unlinked' | 'not_linked' | 'last_identity'> {
+): Promise<'unlinked' | 'not_linked' | 'last_identity' | 'account_conflict'> {
   return db.transaction(async client => {
     const owner = await client.query<{ user_id: string }>(
       `SELECT user_id FROM app_user_identity
@@ -540,6 +540,13 @@ export async function unlinkAccountIdentity(
     if (legacy.rows[0]?.provider === removeProvider) {
       const retained = identities.rows.find(identity => identity.provider !== removeProvider);
       if (!retained) return 'last_identity';
+      // A legacy standalone account can still own the retained provider key.
+      // Never overwrite or delete that account implicitly: it may hold user data.
+      const collision = await client.query<{ id: string }>(
+        'SELECT id FROM app_user WHERE provider = $1 AND provider_subject = $2 AND id <> $3 FOR UPDATE',
+        [retained.provider, retained.provider_subject, userId]
+      );
+      if (collision.rows.length > 0) return 'account_conflict';
       await client.query(
         `UPDATE app_user SET provider = $2, provider_subject = $3,
            github_login = CASE WHEN $2 = 'github' THEN github_login ELSE NULL END,
