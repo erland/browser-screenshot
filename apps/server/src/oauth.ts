@@ -41,7 +41,7 @@ export type McpAccessToken = {
   identity?: VerifiedMcpIdentity;
 };
 
-export type OAuthRefreshRecord = { clientId: string; email: string; scope: string; resource: string; identity?: VerifiedMcpIdentity };
+export type OAuthRefreshRecord = { clientId: string; email: string; scope: string; resource: string; identity?: VerifiedMcpIdentity; issuedAt?: number };
 
 export type VerifiedMcpIdentity = { userId: string; provider: 'github' | 'google'; subject: string; email: string };
 
@@ -186,21 +186,24 @@ export function createDatabaseOAuthStore(db: Pick<Database, 'query'>): OAuthStor
     },
     async consumeRefreshToken(hash, clientId) {
       const result = await db.query<{ client_id: string; email: string; scope: string; resource: string;
-        user_id: string | null; identity_provider: 'github' | 'google' | null; identity_subject: string | null }>(
+        user_id: string | null; identity_provider: 'github' | 'google' | null; identity_subject: string | null; created_at: Date }>(
         `UPDATE oauth_refresh_token SET rotated_at = COALESCE(rotated_at, now())
          WHERE token_hash = $1 AND client_id = $2 AND expires_at > now()
          AND (rotated_at IS NULL OR rotated_at >= now() - interval '30 seconds')
-         RETURNING client_id, email, scope, resource, user_id, identity_provider, identity_subject`, [hash, clientId]
+         RETURNING client_id, email, scope, resource, user_id, identity_provider, identity_subject, created_at`, [hash, clientId]
       );
       const row = result.rows[0];
       return row ? { clientId: row.client_id, email: row.email, scope: row.scope, resource: row.resource,
+        issuedAt: new Date(row.created_at).getTime(),
         ...(row.user_id && row.identity_provider && row.identity_subject ? { identity: {
           userId: row.user_id, provider: row.identity_provider, subject: row.identity_subject, email: row.email
         } } : {}) } : null;
     },
     isAllowed: (email) => isEmailAllowed(db, email),
     async validateIdentity(identity, issuedAt) {
-      if (issuedAt !== undefined || identity.userId) {
+      // New authorization codes have no issuance time and must remain eligible
+      // after an account-wide revocation. Existing credentials always supply it.
+      if (issuedAt !== undefined) {
         const revocation = await db.query<{ mcp_tokens_invalid_before: Date | null }>(
           'SELECT mcp_tokens_invalid_before FROM app_user WHERE id = $1', [identity.userId]);
         if (!revocation.rows[0]) return false;
@@ -410,7 +413,7 @@ export class McpOAuthManager {
           sendOAuthError(reply, 400, 'invalid_target', 'Resource mismatch.');
           return;
         }
-        if (record.identity ? (!this.store.validateIdentity || !(await this.store.validateIdentity(record.identity))) : !(await this.store.isAllowed(record.email))) {
+        if (record.identity ? (!this.store.validateIdentity || !(await this.store.validateIdentity(record.identity, record.issuedAt))) : !(await this.store.isAllowed(record.email))) {
           diagnostic('rejected', 'access_denied');
           sendOAuthError(reply, 403, 'access_denied', 'This email address is no longer allowed.');
           return;
