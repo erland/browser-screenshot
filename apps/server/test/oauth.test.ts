@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
-import { McpOAuthManager, pkceS256, registerMcpOAuthRoutes, type OAuthCodeRecord, type OAuthStore } from '../src/oauth.js';
+import { McpOAuthManager, pkceS256, registerMcpOAuthRoutes, type OAuthCodeRecord, type OAuthRefreshRecord, type OAuthStore } from '../src/oauth.js';
 
 function createStore() {
   const clients = new Map<string, { clientId: string; redirectUris: string[]; clientName?: string | null }>();
   const codes = new Map<string, OAuthCodeRecord>();
-  const refresh = new Map<string, { record: { clientId: string; email: string; scope: string; resource: string }; expiresAt: Date; rotatedAt?: Date }>();
+  const refresh = new Map<string, { record: OAuthRefreshRecord; expiresAt: Date; rotatedAt?: Date }>();
   let allowed = true;
   let seq = 0;
   const store: OAuthStore & { setAllowed(value: boolean): void } = {
