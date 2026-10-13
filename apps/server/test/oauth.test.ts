@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
-import { McpOAuthManager, pkceS256, registerMcpOAuthRoutes, type OAuthCodeRecord, type OAuthStore } from '../src/oauth.js';
+import { McpOAuthManager, pkceS256, registerMcpOAuthRoutes, type OAuthCodeRecord, type OAuthRefreshRecord, type OAuthStore } from '../src/oauth.js';
 
 function createStore() {
   const clients = new Map<string, { clientId: string; redirectUris: string[]; clientName?: string | null }>();
   const codes = new Map<string, OAuthCodeRecord>();
-  const refresh = new Map<string, { record: { clientId: string; email: string; scope: string; resource: string }; expiresAt: Date; rotatedAt?: Date }>();
+  const refresh = new Map<string, { record: OAuthRefreshRecord; expiresAt: Date; rotatedAt?: Date }>();
   let allowed = true;
   let seq = 0;
   const store: OAuthStore & { setAllowed(value: boolean): void } = {
@@ -27,7 +27,7 @@ function createStore() {
       return found;
     },
     async isAllowed() { return allowed; },
-    async saveRefreshToken(hash, record, expiresAt) { refresh.set(hash, { record, expiresAt }); },
+    async saveRefreshToken(hash, record, expiresAt) { refresh.set(hash, { record: { ...record, issuedAt: record.issuedAt ?? Date.now() }, expiresAt }); },
     async consumeRefreshToken(hash, clientId) { const entry = refresh.get(hash); if (!entry || entry.record.clientId !== clientId || entry.expiresAt <= new Date()) return null; if (entry.rotatedAt && Date.now() - entry.rotatedAt.getTime() > 30_000) return null; entry.rotatedAt ??= new Date(); return entry.record; },
   };
   return store;
@@ -209,6 +209,63 @@ describe('MCP OAuth refresh tokens', () => {
   });
 });
 
+
+describe('MCP authorization after account token revocation', () => {
+  it('permits a fresh grant while rejecting refresh and bearer tokens from before revocation', async () => {
+    const store = createStore();
+    const identity = { userId: 'account-with-google-and-github', provider: 'github' as const,
+      subject: 'github-subject', email: 'allowed@example.test' };
+    const cutoff = Date.now() - 30_000;
+    const validatedAt: Array<number | undefined> = [];
+    store.resolveIdentity = async () => identity;
+    store.validateIdentity = async (_candidate, issuedAt) => {
+      validatedAt.push(issuedAt);
+      return issuedAt === undefined || issuedAt > cutoff;
+    };
+    const user = { email: identity.email, githubUserId: identity.subject, githubLogin: 'allowed' };
+    const oauth = new McpOAuthManager(config, store, { getSessionUser: async () => user } as never);
+    const app = Fastify();
+    await registerMcpOAuthRoutes(app, oauth);
+    const registration = await app.inject({ method: 'POST', url: '/oauth/register',
+      payload: { redirect_uris: ['https://client.example.test/callback'] } });
+    const clientId = registration.json().client_id as string;
+    const verifier = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~';
+    const authorize = new URL('/oauth/authorize', config.publicBaseUrl);
+    for (const [key, value] of Object.entries({
+      client_id: clientId, redirect_uri: 'https://client.example.test/callback',
+      response_type: 'code', scope: 'mcp', resource: 'https://screenshots.example.test/mcp',
+      code_challenge: pkceS256(verifier), code_challenge_method: 'S256'
+    })) authorize.searchParams.set(key, value);
+    const response = await app.inject({ method: 'GET', url: authorize.pathname + authorize.search });
+    expect(response.statusCode).toBe(302);
+    const code = new URL(response.headers.location!).searchParams.get('code')!;
+    const token = await app.inject({ method: 'POST', url: '/oauth/token',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ grant_type: 'authorization_code', code, client_id: clientId,
+        redirect_uri: 'https://client.example.test/callback', code_verifier: verifier }).toString() });
+    expect(token.statusCode).toBe(200);
+    expect(validatedAt).toContain(undefined);
+    const bearer = token.json().access_token as string;
+    expect(await oauth.verifyBearer('Bearer ' + bearer)).not.toBeNull();
+
+    const { createHash } = await import('node:crypto');
+    const oldRefresh = 'pre-revocation-credential';
+    await store.saveRefreshToken(createHash('sha256').update(oldRefresh).digest('hex'),
+      { clientId, email: identity.email, scope: 'mcp', resource: config.publicBaseUrl + '/mcp',
+        identity, issuedAt: cutoff - 1000 }, new Date(Date.now() + 86400_000));
+    const refreshRequest = (refreshToken: string) => app.inject({ method: 'POST', url: '/oauth/token',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken,
+        client_id: clientId }).toString() });
+    const oldResponse = await refreshRequest(oldRefresh);
+    expect(oldResponse.statusCode).toBe(403);
+    expect(oldResponse.json().error).toBe('access_denied');
+    const freshResponse = await refreshRequest(token.json().refresh_token as string);
+    // In-memory store must preserve the original issuance time, just like PostgreSQL.
+    expect(freshResponse.statusCode).toBe(200);
+    await app.close();
+  });
+});
 
 describe('Provider-bound MCP grants', () => {
   it('revalidates identity on signed bearer access and rejects revoked identities', async () => {
