@@ -10,6 +10,9 @@ import { registerAuthRoutes } from './auth-routes.js';
 import type { McpOAuthManager } from './oauth.js';
 import { registerMcpOAuthRoutes } from './oauth.js';
 import { registerMcpRoute } from './mcp.js';
+import { automationEnabled } from './automation-sessions.js';
+import { createLeasedAutomationSessionManager } from './automation-runtime.js';
+import { ScreenshotResourceController } from './resource-controls.js';
 import {
   DefaultScreenshotCapability,
   type ScreenshotCapability,
@@ -38,8 +41,24 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   registerSecurityHooks(app, { hsts: options.hsts });
 
-  const screenshotCapability = options.screenshotCapability ?? new DefaultScreenshotCapability();
-  app.addHook('onClose', async () => { await screenshotCapability.close(); });
+  // Automation and screenshot rendering must use the SAME resource controller.
+  // Injected test capabilities deliberately do not enable automation.
+  const sharedResources = !options.screenshotCapability && options.mcpOAuth && automationEnabled()
+    ? new ScreenshotResourceController()
+    : undefined;
+  const screenshotCapability = options.screenshotCapability ??
+    new DefaultScreenshotCapability(sharedResources);
+  const automation = sharedResources
+    ? createLeasedAutomationSessionManager(sharedResources)
+    : undefined;
+  // Close interactive contexts before their underlying Chromium/browser owner.
+  app.addHook('onClose', async () => {
+    try {
+      await automation?.shutdown();
+    } finally {
+      await screenshotCapability.close();
+    }
+  });
 
   await registerPublicInfo(app);
 
@@ -58,7 +77,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   if (options.auth) await registerAuthRoutes(app, options.auth);
   if (options.mcpOAuth) {
     await registerMcpOAuthRoutes(app, options.mcpOAuth);
-    const closeMcp = await registerMcpRoute(app, options.mcpOAuth, screenshotCapability);
+    const closeMcp = await registerMcpRoute(app, options.mcpOAuth, screenshotCapability, automation);
     app.addHook('onClose', async () => { await closeMcp(); });
   }
 
