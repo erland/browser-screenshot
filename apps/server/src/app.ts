@@ -12,6 +12,7 @@ import { registerMcpOAuthRoutes } from './oauth.js';
 import { registerMcpRoute } from './mcp.js';
 import { automationEnabled } from './automation-sessions.js';
 import { createLeasedAutomationSessionManager } from './automation-runtime.js';
+import { navigateAutomationContext } from './automation-browser.js';
 import { ScreenshotResourceController } from './resource-controls.js';
 import {
   DefaultScreenshotCapability,
@@ -77,7 +78,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   if (options.auth) await registerAuthRoutes(app, options.auth);
   if (options.mcpOAuth) {
     await registerMcpOAuthRoutes(app, options.mcpOAuth);
-    const closeMcp = await registerMcpRoute(app, options.mcpOAuth, screenshotCapability, automation);
+    const closeMcp = await registerMcpRoute(app, options.mcpOAuth, screenshotCapability, automation ? {
+      create: (owner) => automation.create(owner),
+      close: (owner, id) => automation.close(owner, id),
+      navigate: (owner, id, url) => navigateAutomationContext(automation.get(owner, id).context, url),
+    } : undefined);
     app.addHook('onClose', async () => { await closeMcp(); });
   }
 
