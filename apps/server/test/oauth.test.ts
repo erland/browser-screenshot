@@ -48,6 +48,16 @@ describe('MCP OAuth', () => {
     const app = Fastify();
     await registerMcpOAuthRoutes(app, oauth);
 
+    const oldFlag = process.env.BROWSER_AUTOMATION_ENABLED;
+    process.env.BROWSER_AUTOMATION_ENABLED = 'true';
+    const created: string[] = [];
+    const closed: string[] = [];
+    const sessionId = 'd97d2801-58d8-4c9e-8882-55de89bb45fb';
+    const closeMcp = await registerMcpRoute(app, oauth, { capture: async () => { throw Error('not used'); } }, {
+      create: async (actor) => { created.push(actor); return { id: sessionId, createdAt: Date.now() }; },
+      close: async (actor, id) => { closed.push(actor + ':' + id); },
+    });
+
     const prm = await app.inject({ method: 'GET', url: '/.well-known/oauth-protected-resource/mcp' });
     expect(prm.statusCode).toBe(200);
     expect(prm.json().resource).toBe('https://screenshots.example.test/mcp');
@@ -90,17 +100,6 @@ describe('MCP OAuth', () => {
     expect(token.json().refresh_token).toBeTruthy();
     expect((await oauth.verifyBearer(`Bearer ${accessToken}`))?.email).toBe('allowed@example.test');
 
-    // Exercise the same OAuth-issued bearer token through the real MCP HTTP
-    // adapter; this is intentionally separate from the mocked bearer test.
-    const oldFlag = process.env.BROWSER_AUTOMATION_ENABLED;
-    process.env.BROWSER_AUTOMATION_ENABLED = 'true';
-    const created: string[] = [];
-    const closed: string[] = [];
-    const sessionId = 'd97d2801-58d8-4c9e-8882-55de89bb45fb';
-    const closeMcp = await registerMcpRoute(app, oauth, { capture: async () => { throw Error('not used'); } }, {
-      create: async (actor) => { created.push(actor); return { id: sessionId, createdAt: Date.now() }; },
-      close: async (actor, id) => { closed.push(actor + ':' + id); },
-    });
     let client: Client | undefined;
     try {
       await app.listen({ host: '127.0.0.1', port: 0 });
