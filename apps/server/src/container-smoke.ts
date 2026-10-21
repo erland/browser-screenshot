@@ -119,7 +119,7 @@ try {
       if (!response.ok) throw new Error('MCP HTTP status: ' + response.status);
       const raw = await response.text();
       const data = response.headers.get('content-type')?.includes('text/event-stream')
-        ? raw.split('\\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).find(line => line.startsWith('{'))
+        ? raw.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).find(line => line.startsWith('{'))
         : raw;
       if (!data) throw new Error('MCP returned no JSON response');
       const json = JSON.parse(data) as { error?: unknown; result?: { tools?: Array<{name: string}>; content?: Array<{type: string; text?: string}>; isError?: boolean } };
