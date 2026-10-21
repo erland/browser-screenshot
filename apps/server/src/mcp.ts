@@ -21,6 +21,8 @@ export interface McpAutomationSessions {
   close(owner: string, id: string): Promise<void>;
   navigate?(owner: string, id: string, url: string): Promise<void>;
   snapshot?(owner: string, id: string): Promise<string>;
+  click?(owner: string, id: string, selector: string): Promise<void>;
+  fill?(owner: string, id: string, selector: string, value: string): Promise<void>;
 }
 
 export function createBrowserScreenshotMcpHandler(
@@ -166,6 +168,38 @@ export function createBrowserScreenshotMcpHandler(
             return { content: [{ type: 'text' as const, text: snapshot }] };
           } catch {
             return { isError: true, content: [{ type: 'text' as const, text: 'SNAPSHOT_UNAVAILABLE' }] };
+          }
+        });
+      }
+      if (automation.click) {
+        server.registerTool('browser_click', {
+          description: 'Click a uniquely identified control in a caller-owned browser session. Only ID and data-testid selectors are supported.',
+          inputSchema: z.object({ sessionId: z.string().uuid(), selector: z.string().min(2).max(200) }),
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        }, async ({ sessionId, selector }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            await automation.click!(owner, sessionId, selector);
+            return { content: [{ type: 'text' as const, text: JSON.stringify({ clicked: true }) }] };
+          } catch {
+            return { isError: true, content: [{ type: 'text' as const, text: 'CLICK_UNAVAILABLE' }] };
+          }
+        });
+      }
+      if (automation.fill) {
+        server.registerTool('browser_fill', {
+          description: 'Fill a single text control in a caller-owned browser session. Password and file inputs are not supported.',
+          inputSchema: z.object({ sessionId: z.string().uuid(), selector: z.string().min(2).max(200), value: z.string().max(10000) }),
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        }, async ({ sessionId, selector, value }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            await automation.fill!(owner, sessionId, selector, value);
+            return { content: [{ type: 'text' as const, text: JSON.stringify({ filled: true }) }] };
+          } catch {
+            return { isError: true, content: [{ type: 'text' as const, text: 'FILL_UNAVAILABLE' }] };
           }
         });
       }
