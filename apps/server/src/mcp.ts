@@ -20,6 +20,7 @@ export interface McpAutomationSessions {
   create(owner: string): Promise<{ id: string; createdAt: number }>;
   close(owner: string, id: string): Promise<void>;
   navigate?(owner: string, id: string, url: string): Promise<void>;
+  snapshot?(owner: string, id: string): Promise<string>;
 }
 
 export function createBrowserScreenshotMcpHandler(
@@ -149,6 +150,22 @@ export function createBrowserScreenshotMcpHandler(
             return { content: [{ type: 'text' as const, text: JSON.stringify({ navigated: true, url }) }] };
           } catch {
             return { isError: true, content: [{ type: 'text' as const, text: 'NAVIGATION_UNAVAILABLE' }] };
+          }
+        });
+      }
+      if (automation.snapshot) {
+        server.registerTool('browser_snapshot', {
+          description: 'Read a bounded semantic overview of a caller-owned browser page.',
+          inputSchema: z.object({ sessionId: z.string().uuid() }),
+          annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        }, async ({ sessionId }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            const snapshot = await automation.snapshot!(owner, sessionId);
+            return { content: [{ type: 'text' as const, text: snapshot }] };
+          } catch {
+            return { isError: true, content: [{ type: 'text' as const, text: 'SNAPSHOT_UNAVAILABLE' }] };
           }
         });
       }
