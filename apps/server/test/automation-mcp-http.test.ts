@@ -42,8 +42,8 @@ describe('MCP HTTP authorization boundary for browser sessions', () => {
   it('passes the validated HTTP bearer actor to session create and close tools', async () => {
     process.env.BROWSER_AUTOMATION_ENABLED = 'true';
     const sessionId = '355c6780-21a8-4b59-bad7-2f7ec5433610';
-    const create = vi.fn(async (_owner: string) => ({ id: sessionId, createdAt: Date.now() }));
-    const close = vi.fn(async (_owner: string, _sessionId: string) => {});
+    const create = vi.fn(async (owner: string) => { void owner; return { id: sessionId, createdAt: Date.now() }; });
+    const close = vi.fn(async (owner: string, session: string) => { void owner; void session; });
     const verifyBearer = vi.fn(async (value?: string) =>
       value === 'Bearer authorized-a'
         ? { email: 'actor@example.test', clientId: 'client', scopes: ['mcp'], exp: Math.floor(Date.now() / 1000) + 3600 }
