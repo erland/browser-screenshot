@@ -53,3 +53,25 @@ export async function navigateAutomationContext(target: SecuredAutomationContext
   await validatePublicUrl(url);
   await target.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10_000 });
 }
+
+/** Read-only, bounded semantic snapshot. Never execute arbitrary page scripts. */
+export async function snapshotAutomationContext(target: SecuredAutomationContext): Promise<string> {
+  const page = target.page;
+  const lines: string[] = [];
+  const title = (await page.title()).slice(0, 240);
+  lines.push('URL: ' + page.url().slice(0, 2048), 'Title: ' + title);
+  const elements = page.locator('h1,h2,h3,a,button,input,textarea,select,[role="button"]');
+  const count = Math.min(await elements.count(), 100);
+  for (let index = 0; index < count; index++) {
+    const element = elements.nth(index);
+    const tag = await element.evaluate((node) => node.tagName.toLowerCase());
+    const label = tag === 'input' || tag === 'textarea' || tag === 'select'
+      ? (await element.getAttribute('aria-label')) ?? (await element.getAttribute('placeholder')) ?? ''
+      : (await element.innerText().catch(() => ''));
+    const type = tag === 'input' ? (await element.getAttribute('type')) ?? 'text' : tag;
+    const href = tag === 'a' ? (await element.getAttribute('href')) ?? '' : '';
+    lines.push('[' + index + '] ' + type + ': ' + label.replace(/\\s+/g, ' ').slice(0, 200) + (href ? ' -> ' + href.slice(0, 300) : ''));
+    if (lines.join('\\n').length > 12_000) break;
+  }
+  return lines.join('\\n').slice(0, 12_000);
+}
