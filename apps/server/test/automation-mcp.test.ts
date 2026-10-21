@@ -132,4 +132,24 @@ describe('automation MCP contract via real MCP transport', () => {
     } finally { await x.close(); }
   });
 
+  it('routes click/fill through the owning actor and rejects cross-user calls', async () => {
+    process.env.BROWSER_AUTOMATION_ENABLED = 'true';
+    let owner: string | undefined = 'owner-a';
+    const id = '0a35c020-6bf0-439c-8c3d-09c9c609969a';
+    const click = vi.fn(async (actor: string) => { if (actor !== 'owner-a') throw Error('NOT_FOUND'); });
+    const fill = vi.fn(async (actor: string) => { if (actor !== 'owner-a') throw Error('NOT_FOUND'); });
+    const x = await connect(() => owner, { create: vi.fn(), close: vi.fn(), click, fill });
+    try {
+      const names = (await x.client.listTools()).tools.map(t => t.name);
+      expect(names).toEqual(expect.arrayContaining(['browser_click', 'browser_fill']));
+      expect((await x.client.callTool({ name: 'browser_click', arguments: { sessionId: id, selector: '#submit' } })).isError).not.toBe(true);
+      expect((await x.client.callTool({ name: 'browser_fill', arguments: { sessionId: id, selector: '#search', value: 'hello' } })).isError).not.toBe(true);
+      expect(click).toHaveBeenCalledWith('owner-a', id, '#submit');
+      expect(fill).toHaveBeenCalledWith('owner-a', id, '#search', 'hello');
+      owner = 'other';
+      expect((await x.client.callTool({ name: 'browser_click', arguments: { sessionId: id, selector: '#submit' } })).isError).toBe(true);
+      expect((await x.client.callTool({ name: 'browser_fill', arguments: { sessionId: id, selector: '#search', value: 'hello' } })).isError).toBe(true);
+    } finally { await x.close(); }
+  });
+
 });
