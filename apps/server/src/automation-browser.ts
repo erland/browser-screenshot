@@ -70,15 +70,15 @@ export async function snapshotAutomationContext(target: SecuredAutomationContext
       : (await element.innerText().catch(() => ''));
     const type = tag === 'input' ? (await element.getAttribute('type')) ?? 'text' : tag;
     const href = tag === 'a' ? (await element.getAttribute('href')) ?? '' : '';
-    lines.push('[' + index + '] ' + type + ': ' + label.replace(/\\s+/g, ' ').slice(0, 200) + (href ? ' -> ' + href.slice(0, 300) : ''));
-    if (lines.join('\\n').length > 12_000) break;
+    lines.push('[' + index + '] ' + type + ': ' + label.replace(/\s+/g, ' ').slice(0, 200) + (href ? ' -> ' + href.slice(0, 300) : ''));
+    if (lines.join('\n').length > 12_000) break;
   }
-  return lines.join('\\n').slice(0, 12_000);
+  return lines.join('\n').slice(0, 12_000);
 }
 
 /** Restrict interactions to a simple, bounded CSS selector for visible controls. */
 function controlLocator(target: SecuredAutomationContext, selector: string) {
-  if (selector.length > 200 || !/^(?:#[a-zA-Z][\\w-]*|\\[data-testid="[a-zA-Z0-9_-]{1,80}"\\])$/.test(selector)) {
+  if (selector.length > 200 || !/^(?:#[a-zA-Z][\w-]*|\[data-testid="[a-zA-Z0-9_-]{1,80}"\])$/.test(selector)) {
     throw new Error('INVALID_CONTROL_SELECTOR');
   }
   return target.page.locator(selector);
