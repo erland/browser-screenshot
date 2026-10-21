@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSecuredAutomationContext } from './automation-browser.js';
+import { createSecuredAutomationContext, clickAutomationControl, fillAutomationControl } from './automation-browser.js';
 
 describe('secure automation browser adapter', () => {
   it('creates restricted contexts without launching another Chromium instance', async () => {
@@ -39,4 +39,24 @@ describe('secure automation browser adapter', () => {
       .rejects.toThrow('page failed');
     expect(close).toHaveBeenCalledOnce();
   });
+  it('accepts bounded ID and test-id selectors, rejects arbitrary selectors', async () => {
+    const click = vi.fn(async () => {});
+    const fill = vi.fn(async () => {});
+    const locator = vi.fn(() => ({
+      count: async () => 1,
+      click,
+      fill,
+      evaluate: async () => 'input',
+      getAttribute: async () => 'text',
+    }));
+    const target = { page: { locator } } as never;
+    await clickAutomationControl(target, '#apply');
+    await fillAutomationControl(target, '#entry', 'hello');
+    await clickAutomationControl(target, '[data-testid="save-button"]');
+    expect(click).toHaveBeenCalledTimes(2);
+    expect(fill).toHaveBeenCalledWith('hello', { timeout: 10_000 });
+    await expect(clickAutomationControl(target, 'body button')).rejects.toThrow('INVALID_CONTROL_SELECTOR');
+    await expect(fillAutomationControl(target, '#entry', 'x'.repeat(10_001))).rejects.toThrow('VALUE_TOO_LONG');
+  });
+
 });
