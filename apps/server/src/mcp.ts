@@ -19,6 +19,7 @@ const BROWSER_SCREENSHOT_ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAAN
 export interface McpAutomationSessions {
   create(owner: string): Promise<{ id: string; createdAt: number }>;
   close(owner: string, id: string): Promise<void>;
+  navigate?(owner: string, id: string, url: string): Promise<void>;
 }
 
 export function createBrowserScreenshotMcpHandler(
@@ -135,6 +136,22 @@ export function createBrowserScreenshotMcpHandler(
           return { isError: true, content: [{ type: 'text' as const, text: 'SESSION_UNAVAILABLE' }] };
         }
       });
+      if (automation.navigate) {
+        server.registerTool('browser_navigate', {
+          description: 'Navigate an existing, caller-owned browser session to a public HTTP(S) URL.',
+          inputSchema: z.object({ sessionId: z.string().uuid(), url: z.string().url().max(2048) }),
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        }, async ({ sessionId, url }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            await automation.navigate!(owner, sessionId, url);
+            return { content: [{ type: 'text' as const, text: JSON.stringify({ navigated: true, url }) }] };
+          } catch {
+            return { isError: true, content: [{ type: 'text' as const, text: 'NAVIGATION_UNAVAILABLE' }] };
+          }
+        });
+      }
       server.registerTool('browser_session_close', {
         description: 'Close a browser session owned by the authenticated caller.',
         inputSchema: z.object({ sessionId: z.string().uuid() }),
