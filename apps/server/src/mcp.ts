@@ -1,4 +1,6 @@
 import type { IncomingMessage } from 'node:http';
+import { z } from 'zod';
+import { automationEnabled } from './automation-sessions.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { FastifyInstance } from 'fastify';
 import { McpServer, createMcpHandler, type AuthInfo } from '@modelcontextprotocol/server';
@@ -14,9 +16,15 @@ const BROWSER_SCREENSHOT_DESCRIPTION =
 const BROWSER_SCREENSHOT_WEBSITE = 'https://browser-screenshot.apphome.one/about';
 const BROWSER_SCREENSHOT_ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABJklEQVR4nO2bwQ3CMBAECeLLD0ERlEIN0AD10AA1hFIogirghRShQMzZZix25x3h0eicOJHo1vv+PhNmTgvQOAAtQOMAtACNA9ACNA5AC9A4AC1A4wC0AM0i9cLraVfTowrb42XyGvkJcABagMYBaAEaB6AFaJLPAatlTQ0O+QmQD5C8BcbYHMaPmrdzvWNz6TXDE/BOhCLq4y1Q4kdqjvzUWrmTKD8BDkAL0ITvAb/c95/I9ZCfAAegBWgcgBagCT8Fhicw8omQ6yE/AQ5AC9AUeRt8fSMjPohEkZ+AcIBW3gWeRH2ytgARofSayRPQ2jfAKVJ95e8BXeT/Aq3t/yHfTmoowD8hvwUcgBagcQBagMYBaAEaB6AFaByAFqBxAFqARj7AA03iMc36yblqAAAAAElFTkSuQmCC';
 
+export interface McpAutomationSessions {
+  create(owner: string): Promise<{ id: string; createdAt: number }>;
+  close(owner: string, id: string): Promise<void>;
+}
+
 export function createBrowserScreenshotMcpHandler(
   capability: Pick<ScreenshotCapability, 'capture'>,
   actorKeyProvider: () => string | undefined = () => undefined,
+  automation?: McpAutomationSessions,
 ) {
   return createMcpHandler(() => {
     const server = new McpServer({
@@ -110,6 +118,38 @@ export function createBrowserScreenshotMcpHandler(
         }
       },
     );
+    // Both conditions are mandatory: explicit configuration and a provisioned,
+    // application-owned session service. Missing configuration exposes no tools.
+    if (automation && automationEnabled()) {
+      server.registerTool('browser_session_create', {
+        description: 'Create an isolated browser session for interactive testing.',
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      }, async () => {
+        const owner = actorKeyProvider();
+        if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+        try {
+          const created = await automation.create(owner);
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ sessionId: created.id }) }] };
+        } catch {
+          return { isError: true, content: [{ type: 'text' as const, text: 'SESSION_UNAVAILABLE' }] };
+        }
+      });
+      server.registerTool('browser_session_close', {
+        description: 'Close a browser session owned by the authenticated caller.',
+        inputSchema: z.object({ sessionId: z.string().uuid() }),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      }, async ({ sessionId }) => {
+        const owner = actorKeyProvider();
+        if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+        try {
+          await automation.close(owner, sessionId);
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ closed: true }) }] };
+        } catch {
+          return { isError: true, content: [{ type: 'text' as const, text: 'SESSION_NOT_FOUND' }] };
+        }
+      });
+    }
     return server;
   });
 }
@@ -124,9 +164,10 @@ export async function registerMcpRoute(
   app: FastifyInstance,
   oauth: McpOAuthManager,
   capability: Pick<ScreenshotCapability, 'capture'>,
+  automation?: McpAutomationSessions,
 ): Promise<() => Promise<void>> {
   const actorContext = new AsyncLocalStorage<string>();
-  const handler = createBrowserScreenshotMcpHandler(capability, () => actorContext.getStore());
+  const handler = createBrowserScreenshotMcpHandler(capability, () => actorContext.getStore(), automation);
   const nodeHandler = toNodeHandler(handler);
 
   app.route({
