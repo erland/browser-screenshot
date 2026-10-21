@@ -12,7 +12,7 @@ import { registerMcpOAuthRoutes } from './oauth.js';
 import { registerMcpRoute } from './mcp.js';
 import { automationEnabled } from './automation-sessions.js';
 import { createLeasedAutomationSessionManager } from './automation-runtime.js';
-import { navigateAutomationContext, snapshotAutomationContext } from './automation-browser.js';
+import { navigateAutomationContext, snapshotAutomationContext, clickAutomationControl, fillAutomationControl } from './automation-browser.js';
 import { ScreenshotResourceController } from './resource-controls.js';
 import {
   DefaultScreenshotCapability,
@@ -83,6 +83,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       close: (owner, id) => automation.close(owner, id),
       navigate: (owner, id, url) => navigateAutomationContext(automation.get(owner, id).context, url),
       snapshot: (owner, id) => snapshotAutomationContext(automation.get(owner, id).context),
+      click: (owner, id, selector) => clickAutomationControl(automation.get(owner, id).context, selector),
+      fill: (owner, id, selector, value) => fillAutomationControl(automation.get(owner, id).context, selector, value),
     } : undefined);
     app.addHook('onClose', async () => { await closeMcp(); });
   }
