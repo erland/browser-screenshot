@@ -88,4 +88,26 @@ describe('automation MCP contract via real MCP transport', () => {
       expect(automation.create).not.toHaveBeenCalled();
     } finally { await x.close(); }
   });
+  it('binds navigation to the caller and preserves the existing URL policy boundary', async () => {
+    process.env.BROWSER_AUTOMATION_ENABLED = 'true';
+    let owner: string | undefined = 'owner-a';
+    const navigate = vi.fn(async (actor: string, id: string, url: string) => {
+      if (actor !== 'owner-a' || id !== '0a35c020-6bf0-439c-8c3d-09c9c609969a') throw Error('NOT_FOUND');
+      if (!url.startsWith('https://')) throw Error('BLOCKED_DESTINATION');
+    });
+    const automation = { create: vi.fn(), close: vi.fn(), navigate };
+    const x = await connect(() => owner, automation);
+    try {
+      expect((await x.client.listTools()).tools.map(t => t.name)).toContain('browser_navigate');
+      const args = { sessionId: '0a35c020-6bf0-439c-8c3d-09c9c609969a', url: 'https://example.com' };
+      const success = await x.client.callTool({ name: 'browser_navigate', arguments: args });
+      expect(success.isError).not.toBe(true);
+      expect(navigate).toHaveBeenCalledWith('owner-a', args.sessionId, args.url);
+      owner = 'owner-b';
+      expect((await x.client.callTool({ name: 'browser_navigate', arguments: args })).isError).toBe(true);
+      owner = undefined;
+      expect((await x.client.callTool({ name: 'browser_navigate', arguments: args })).isError).toBe(true);
+    } finally { await x.close(); }
+  });
+
 });
