@@ -1,7 +1,7 @@
 import { captureWithFreshContext, launchScreenshotBrowser } from './browser.js';
 import { InternalCaptureError } from './capture-errors.js';
 import { createAutomationSessionManager } from './automation-runtime.js';
-import { navigateAutomationContext } from './automation-browser.js';
+import { navigateAutomationContext, snapshotAutomationContext, fillAutomationControl, clickAutomationControl } from './automation-browser.js';
 
 function assertPng(buffer: Buffer): void {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -51,6 +51,36 @@ try {
     if (bodyCount !== 1) throw new Error('Automation page has no HTML body.');
     const automationPng = await target.page.screenshot({ type: 'png' });
     assertPng(automationPng);
+    // Exercise interaction against deterministic local markup in the *same*
+    // already-authorized page; no loopback web server or external fixture.
+    await target.page.setContent(`
+      <!doctype html><html><head><title>Automation test</title></head>
+      <body><h1>Automation fixture</h1>
+      <label for="entry">Value</label><input id="entry" type="text" aria-label="Value">
+      <button id="apply" type="button">Apply</button>
+      <output id="result">Initial</output>
+      <script>
+        document.getElementById('apply').addEventListener('click', () => {
+          document.getElementById('result').textContent =
+            document.getElementById('entry').value;
+        });
+      </script></body></html>
+    `);
+    const before = await snapshotAutomationContext(target);
+    if (!before.includes('Automation fixture') || !before.includes('button: Apply')) {
+      throw new Error('Semantic snapshot did not include expected controls.');
+    }
+    await fillAutomationControl(target, '#entry', 'verified-input');
+    await clickAutomationControl(target, '#apply');
+    if ((await target.page.locator('#result').textContent()) !== 'verified-input') {
+      throw new Error('Chromium form interaction did not update the page.');
+    }
+    let passwordDenied = false;
+    await target.page.locator('#entry').evaluate(node => node.setAttribute('type', 'password'));
+    try { await fillAutomationControl(target, '#entry', 'secret'); }
+    catch { passwordDenied = true; }
+    if (!passwordDenied) throw new Error('Password input was not blocked.');
+
     let denied = false;
     try { await navigateAutomationContext(target, 'http://127.0.0.1:8080/health'); }
     catch { denied = true; }
