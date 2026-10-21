@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { createBrowserScreenshotMcpHandler } from '../src/mcp.js';
+import { createBrowserScreenshotMcpHandler, type McpAutomationSessions } from '../src/mcp.js';
 
 const capture = vi.fn();
 const prior = process.env.BROWSER_AUTOMATION_ENABLED;
@@ -9,10 +9,7 @@ afterEach(() => {
   else process.env.BROWSER_AUTOMATION_ENABLED = prior;
 });
 
-async function connect(owner: () => string | undefined, automation?: {
-  create(owner: string): Promise<{ id: string; createdAt: number }>;
-  close(owner: string, id: string): Promise<void>;
-}) {
+async function connect(owner: () => string | undefined, automation?: McpAutomationSessions) {
   const handler = createBrowserScreenshotMcpHandler({ capture }, owner, automation);
   const client = new Client({ name: 'automation-contract-test', version: '1.0.0' });
   const transport = new StreamableHTTPClientTransport(new URL('https://test.example/mcp'), {
