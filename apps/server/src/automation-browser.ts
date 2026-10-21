@@ -75,3 +75,28 @@ export async function snapshotAutomationContext(target: SecuredAutomationContext
   }
   return lines.join('\\n').slice(0, 12_000);
 }
+
+/** Restrict interactions to a simple, bounded CSS selector for visible controls. */
+function controlLocator(target: SecuredAutomationContext, selector: string) {
+  if (selector.length > 200 || !/^(?:#[a-zA-Z][\\w-]*|\\[data-testid="[a-zA-Z0-9_-]{1,80}"\\])$/.test(selector)) {
+    throw new Error('INVALID_CONTROL_SELECTOR');
+  }
+  return target.page.locator(selector);
+}
+
+export async function clickAutomationControl(target: SecuredAutomationContext, selector: string): Promise<void> {
+  const element = controlLocator(target, selector);
+  if (await element.count() !== 1) throw new Error('CONTROL_NOT_UNIQUE');
+  await element.click({ timeout: 10_000 });
+}
+
+export async function fillAutomationControl(target: SecuredAutomationContext, selector: string, value: string): Promise<void> {
+  if (value.length > 10_000) throw new Error('VALUE_TOO_LONG');
+  const element = controlLocator(target, selector);
+  if (await element.count() !== 1) throw new Error('CONTROL_NOT_UNIQUE');
+  const tag = await element.evaluate(node => node.tagName.toLowerCase());
+  if (!['input', 'textarea'].includes(tag)) throw new Error('NOT_EDITABLE_CONTROL');
+  const type = (await element.getAttribute('type'))?.toLowerCase();
+  if (type === 'password' || type === 'file' || type === 'hidden') throw new Error('SENSITIVE_CONTROL');
+  await element.fill(value, { timeout: 10_000 });
+}
