@@ -40,9 +40,17 @@ try {
     const session = await sessions.create('smoke-actor');
     const target = sessions.get('smoke-actor', session.id).context;
     await navigateAutomationContext(target, process.env.SMOKE_PUBLIC_URL ?? 'https://example.com');
-    if (!(await target.page.locator('h1').first().textContent())?.trim()) {
-      throw new Error('Automation could not read the page heading.');
+    // Remote pages are not guaranteed to contain an h1. Check actual browser
+    // navigation, a parsed document and rendered pixels instead.
+    const expectedUrl = new URL(process.env.SMOKE_PUBLIC_URL ?? 'https://example.com');
+    const actualUrl = new URL(target.page.url());
+    if (actualUrl.hostname !== expectedUrl.hostname || actualUrl.protocol !== 'https:') {
+      throw new Error('Automation did not navigate to the expected HTTPS host.');
     }
+    const bodyCount = await target.page.locator('body').count();
+    if (bodyCount !== 1) throw new Error('Automation page has no HTML body.');
+    const automationPng = await target.page.screenshot({ type: 'png' });
+    assertPng(automationPng);
     let denied = false;
     try { await navigateAutomationContext(target, 'http://127.0.0.1:8080/health'); }
     catch { denied = true; }
