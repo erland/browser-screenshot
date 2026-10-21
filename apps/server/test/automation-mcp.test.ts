@@ -110,4 +110,26 @@ describe('automation MCP contract via real MCP transport', () => {
     } finally { await x.close(); }
   });
 
+  it('returns only the caller-owned semantic snapshot', async () => {
+    process.env.BROWSER_AUTOMATION_ENABLED = 'true';
+    let owner: string | undefined = 'actor-a';
+    const snapshot = vi.fn(async (actor: string, id: string) => {
+      if (actor !== 'actor-a' || id !== '0a35c020-6bf0-439c-8c3d-09c9c609969a') throw Error('NOT_FOUND');
+      return 'Title: Public page';
+    });
+    const automation = { create: vi.fn(), close: vi.fn(), snapshot };
+    const x = await connect(() => owner, automation);
+    try {
+      expect((await x.client.listTools()).tools.map(t => t.name)).toContain('browser_snapshot');
+      const args = { sessionId: '0a35c020-6bf0-439c-8c3d-09c9c609969a' };
+      const result = await x.client.callTool({ name: 'browser_snapshot', arguments: args });
+      expect(result.isError).not.toBe(true);
+      expect(snapshot).toHaveBeenCalledWith('actor-a', args.sessionId);
+      owner = 'actor-b';
+      expect((await x.client.callTool({ name: 'browser_snapshot', arguments: args })).isError).toBe(true);
+      owner = undefined;
+      expect((await x.client.callTool({ name: 'browser_snapshot', arguments: args })).isError).toBe(true);
+    } finally { await x.close(); }
+  });
+
 });
