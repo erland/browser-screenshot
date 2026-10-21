@@ -3,7 +3,6 @@ import { InternalCaptureError } from './capture-errors.js';
 import { createAutomationSessionManager } from './automation-runtime.js';
 import { navigateAutomationContext, snapshotAutomationContext, fillAutomationControl, clickAutomationControl } from './automation-browser.js';
 import { createBrowserScreenshotMcpHandler } from './mcp.js';
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
 function assertPng(buffer: Buffer): void {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -108,20 +107,40 @@ try {
         fill: (owner, id, selector, value) => fillAutomationControl(sessions.get(owner, id).context, selector, value),
       },
     );
-    const transport = new StreamableHTTPClientTransport(new URL('https://smoke.example.test/mcp'), {
-      fetch: (input, init) => mcp.fetch(input instanceof Request ? input : new Request(input, init)),
-    });
-    const client = new Client({ name: 'chromium-smoke', version: '1.0.0' });
+    // Use the built-in Fetch API for this packaged-runtime check. The MCP
+    // client SDK is intentionally a devDependency, absent from production images.
+    let nextId = 0;
+    async function mcpRequest(method: string, params: Record<string, unknown>) {
+      const response = await mcp.fetch(new Request('https://smoke.example.test/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: ++nextId, method, params }),
+      }));
+      if (!response.ok) throw new Error('MCP HTTP status: ' + response.status);
+      const raw = await response.text();
+      const data = response.headers.get('content-type')?.includes('text/event-stream')
+        ? raw.split('\\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).find(line => line.startsWith('{'))
+        : raw;
+      if (!data) throw new Error('MCP returned no JSON response');
+      const json = JSON.parse(data) as { error?: unknown; result?: { tools?: Array<{name: string}>; content?: Array<{type: string; text?: string}>; isError?: boolean } };
+      if (json.error || !json.result) throw new Error('MCP protocol error: ' + JSON.stringify(json.error));
+      return json.result;
+    }
     try {
-      await client.connect(transport);
-      const listed = (await client.listTools()).tools.map(tool => tool.name);
+      await mcpRequest('initialize', {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: 'chromium-smoke', version: '1.0.0' },
+      });
+      const tools = await mcpRequest('tools/list', {});
+      const listed = (tools.tools ?? []).map(tool => tool.name);
       for (const name of ['browser_session_create', 'browser_snapshot', 'browser_fill', 'browser_click', 'browser_session_close']) {
         if (!listed.includes(name)) throw new Error('Missing MCP tool: ' + name);
       }
-      const created = await client.callTool({ name: 'browser_session_create', arguments: {} });
+      const call = (name: string, args: Record<string, unknown>) => mcpRequest('tools/call', { name, arguments: args });
+      const created = await call('browser_session_create', {});
       if (created.isError) throw new Error('MCP session creation failed.');
-      const content = created.content as Array<{ type: string; text?: string }>;
-      const id = JSON.parse(content.find(part => part.type === 'text')?.text ?? '{}').sessionId as string;
+      const id = JSON.parse(created.content?.find(part => part.type === 'text')?.text ?? '{}').sessionId as string;
       if (!id) throw new Error('MCP session ID missing.');
       const mcpPage = sessions.get('smoke-actor', id).context.page;
       await mcpPage.setContent(`<h1>MCP fixture</h1><input id="mcp-entry"><button id="mcp-apply">Apply</button>
@@ -129,19 +148,18 @@ try {
         <script>document.getElementById('mcp-apply').onclick = () => {
           document.getElementById('mcp-result').textContent = document.getElementById('mcp-entry').value;
         };</script>`);
-      const snap = await client.callTool({ name: 'browser_snapshot', arguments: { sessionId: id } });
-      if (snap.isError || !(snap.content as Array<{ text?: string }>).some(item => item.text?.includes('MCP fixture'))) {
+      const snap = await call('browser_snapshot', { sessionId: id });
+      if (snap.isError || !snap.content?.some(item => item.text?.includes('MCP fixture'))) {
         throw new Error('MCP snapshot did not read Chromium fixture.');
       }
-      const filled = await client.callTool({ name: 'browser_fill', arguments: { sessionId: id, selector: '#mcp-entry', value: 'MCP works' } });
-      const clicked = await client.callTool({ name: 'browser_click', arguments: { sessionId: id, selector: '#mcp-apply' } });
+      const filled = await call('browser_fill', { sessionId: id, selector: '#mcp-entry', value: 'MCP works' });
+      const clicked = await call('browser_click', { sessionId: id, selector: '#mcp-apply' });
       if (filled.isError || clicked.isError || await mcpPage.locator('#mcp-result').textContent() !== 'MCP works') {
         throw new Error('MCP click/fill did not modify real Chromium page.');
       }
-      const ended = await client.callTool({ name: 'browser_session_close', arguments: { sessionId: id } });
+      const ended = await call('browser_session_close', { sessionId: id });
       if (ended.isError) throw new Error('MCP session close failed.');
     } finally {
-      await client.close();
       await mcp.close();
       if (oldFlag === undefined) delete process.env.BROWSER_AUTOMATION_ENABLED;
       else process.env.BROWSER_AUTOMATION_ENABLED = oldFlag;
