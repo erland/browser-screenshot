@@ -217,6 +217,7 @@ try {
         close: (owner, id) => sessions.close(owner, id),
         navigate: (owner, id, url) => navigateAutomationContext(sessions.get(owner, id).context, url),
         snapshot: (owner, id) => snapshotAutomationContext(sessions.get(owner, id).context),
+        screenshot: (owner, id, fullPage) => screenshotAutomationContext(sessions.get(owner, id).context, fullPage),
         click: (owner, id, selector) => clickAutomationControl(sessions.get(owner, id).context, selector),
         fill: (owner, id, selector, value) => fillAutomationControl(sessions.get(owner, id).context, selector, value),
       },
@@ -248,7 +249,7 @@ try {
       });
       const tools = await mcpRequest('tools/list', {});
       const listed = (tools.tools ?? []).map(tool => tool.name);
-      for (const name of ['browser_session_create', 'browser_snapshot', 'browser_fill', 'browser_click', 'browser_session_close']) {
+      for (const name of ['browser_session_create', 'browser_snapshot', 'browser_session_screenshot', 'browser_fill', 'browser_click', 'browser_session_close']) {
         if (!listed.includes(name)) throw new Error('Missing MCP tool: ' + name);
       }
       const call = (name: string, args: Record<string, unknown>) => mcpRequest('tools/call', { name, arguments: args });
@@ -273,6 +274,12 @@ try {
       if (filled.isError || clicked.isError || await mcpPage.locator('#mcp-result').textContent() !== 'MCP works') {
         throw new Error('MCP click/fill did not modify real Chromium page.');
       }
+      const imageResult = await call('browser_session_screenshot', { sessionId: id });
+      const imagePart = imageResult.content?.find(part => part.type === 'image');
+      if (imageResult.isError || !imagePart?.data) {
+        throw new Error('MCP session screenshot returned no image.');
+      }
+      assertPng(Buffer.from(imagePart.data, 'base64'));
       const ended = await call('browser_session_close', { sessionId: id });
       if (ended.isError) throw new Error('MCP session close failed.');
     } finally {
