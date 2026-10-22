@@ -103,4 +103,38 @@ describe('automation session manager (private PoC foundation)', () => {
     expect(manager.activeCount).toBe(0);
   });
 
+  it('reaps an idle session without waiting for a new user request', async () => {
+    let now = 0;
+    const { manager, close } = create(() => now);
+    await manager.create('actor');
+    now = 5 * 60_000;
+    await manager.reap();
+    expect(close).toHaveBeenCalledOnce();
+    expect(manager.activeCount).toBe(0);
+  });
+
+  it('waits for an in-flight action before reaping an expired session', async () => {
+    let now = 0;
+    const { manager, close } = create(() => now);
+    const session = await manager.create('actor');
+    let finish!: () => void;
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    let started!: () => void;
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    const work = manager.run('actor', session.id, async () => {
+      started();
+      await gate;
+    });
+    await entered;
+    now = 15 * 60_000;
+    const reaping = manager.reap();
+    await Promise.resolve();
+    expect(close).not.toHaveBeenCalled();
+    expect(() => manager.get('actor', session.id)).toThrow('NOT_FOUND');
+    finish();
+    await Promise.all([work, reaping]);
+    expect(close).toHaveBeenCalledOnce();
+    expect(manager.activeCount).toBe(0);
+  });
+
 });
