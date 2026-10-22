@@ -239,7 +239,9 @@ try {
       if (created.isError) throw new Error('MCP session creation failed: ' + JSON.stringify(created.content));
       const id = JSON.parse(created.content?.find(part => part.type === 'text')?.text ?? '{}').sessionId as string;
       if (!id) throw new Error('MCP session ID missing.');
-      const mcpPage = sessions.get('smoke-actor', id).context.page;
+      const mcpTarget = sessions.get('smoke-actor', id).context;
+      const mcpPage = mcpTarget.page;
+      await navigateAutomationContext(mcpTarget, process.env.SMOKE_PUBLIC_URL ?? 'https://example.com');
       await mcpPage.setContent(`<h1>MCP fixture</h1><input id="mcp-entry"><button id="mcp-apply">Apply</button>
         <output id="mcp-result">Initial</output>
         <script>document.getElementById('mcp-apply').onclick = () => {
@@ -339,6 +341,7 @@ try {
     const securedId = JSON.parse(createdResult.result?.content?.find(item => item.type === 'text')?.text ?? '{}').sessionId as string;
     if (!securedId) throw new Error('Authenticated MCP session ID missing.');
     const context = securedSessions.get('authorized@example.test', securedId).context;
+    await navigateAutomationContext(context, process.env.SMOKE_PUBLIC_URL ?? 'https://example.com');
     await context.page.setContent('<h1>Authenticated Chromium</h1><input id="entry"><button id="apply">Apply</button><output id="result"></output><script>document.getElementById("apply").onclick=()=>document.getElementById("result").textContent=document.getElementById("entry").value;</script>');
     for (const [id, name, args] of [
       [3, 'browser_fill', { sessionId: securedId, selector: '#entry', value: 'oauth-browser-ok' }],
