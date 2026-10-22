@@ -90,6 +90,8 @@ try {
     try { sessions.get('other-actor', session.id); }
     catch { wrongOwnerDenied = true; }
     if (!wrongOwnerDenied) throw new Error('Automation allowed cross-owner access.');
+    await sessions.close('smoke-actor', session.id);
+    if (sessions.activeCount !== 0) throw new Error('Initial automation context leaked.');
     // Real MCP transport -> tool registration -> owner-bound Playwright context.
     // OAuth is tested separately: this local smoke supplies the verified actor
     // identity directly and does not open a public listener.
@@ -139,7 +141,7 @@ try {
       }
       const call = (name: string, args: Record<string, unknown>) => mcpRequest('tools/call', { name, arguments: args });
       const created = await call('browser_session_create', {});
-      if (created.isError) throw new Error('MCP session creation failed.');
+      if (created.isError) throw new Error('MCP session creation failed: ' + JSON.stringify(created.content));
       const id = JSON.parse(created.content?.find(part => part.type === 'text')?.text ?? '{}').sessionId as string;
       if (!id) throw new Error('MCP session ID missing.');
       const mcpPage = sessions.get('smoke-actor', id).context.page;
@@ -164,7 +166,6 @@ try {
       if (oldFlag === undefined) delete process.env.BROWSER_AUTOMATION_ENABLED;
       else process.env.BROWSER_AUTOMATION_ENABLED = oldFlag;
     }
-    await sessions.close('smoke-actor', session.id);
     if (sessions.activeCount !== 0) throw new Error('Automation context leaked.');
   } finally {
     await sessions.shutdown();
