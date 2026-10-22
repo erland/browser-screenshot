@@ -286,12 +286,13 @@ try {
     if (await pageA.title() !== 'Lease A' || await pageB.title() !== 'Lease B') {
       throw new Error('Shared resource controller invalidated an active automation context.');
     }
-    if (sharedSessions.activeCount !== 2) {
+    const sharedActiveCount = () => sharedSessions.activeCount;
+    if (sharedActiveCount() !== 2) {
       throw new Error('Shared controller lost automation session capacity.');
     }
     await sharedSessions.close('load-actor-a', a.id);
     await sharedSessions.close('load-actor-b', b.id);
-    if (sharedSessions.activeCount !== 0) throw new Error('Shared controller leaked automation leases.');
+    if (sharedActiveCount() !== 0) throw new Error('Shared controller leaked automation leases.');
   } finally {
     await sharedSessions.shutdown();
     await sharedResources.close();
