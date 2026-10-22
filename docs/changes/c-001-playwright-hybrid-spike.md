@@ -171,3 +171,38 @@ an allowed origin.
 The next practical acceptance milestone is a controlled, deployed, OAuth-authorized
 PWA Preview test with an explicitly allowlisted disposable test origin and a
 documented cleanup/revocation check.
+
+## Release-scope decision – 2026-10-22
+
+**Engine decision:** use the application-owned direct Playwright adapter behind the
+existing authenticated MCP endpoint. Do not embed an additional Microsoft
+Playwright MCP server. This keeps the existing OAuth identity boundary,
+restricted browser launcher/proxy and screenshot resource controller in
+one application ownership model. The alternative was not benchmarked in this
+PoC; no performance superiority is asserted.
+
+**Acceptance-plan change (user decision):** C001-07 (deployed OAuth-authorized
+PWA Preview end-to-end) is explicitly **deferred to manual testing after
+release**. It is no longer a prerequisite for *merging code with the feature
+disabled*. It remains a prerequisite to considering the automation feature
+operationally validated and enabling it for ordinary users. Earlier checklist
+language saying the PR can never merge without C001-07 is superseded for this
+feature-off release scope.
+
+**Current release-readiness assessment:** code CI #443 passed. The remote
+`scripts/verify-acceptance.sh` was inspected: it needs `BASE_URL`,
+`REST_COOKIE`, and `MCP_ACCESS_TOKEN` against a live service. It has not
+been run in this review, and must not be marked PASS. See README for the
+manual test and rollback procedure.
+
+**Residual risks, accepted only for dormant/disabled code shipment:**
+- A failed Chromium context close may intentionally retain a resource slot;
+  forced recovery of a stuck context may require a process restart.
+- Sustained concurrent session/screenshot resource metrics and complete
+  end-to-end network bypass checks remain outstanding.
+- Approving an HTTPS write origin permits potentially consequential clicks
+  there; MCP `destructiveHint` is advisory, not an enforcement mechanism.
+
+**Gate distinction:** review/merge of disabled, tested code may proceed
+subject to normal repository review; **feature activation remains blocked**
+pending manual deployed acceptance and residual security evaluation.
