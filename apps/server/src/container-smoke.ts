@@ -181,8 +181,8 @@ try {
     catch { wrongOwnerDenied = true; }
     if (!wrongOwnerDenied) throw new Error('Automation allowed cross-owner access.');
     await sessions.close('smoke-actor', session.id);
-    const remainingAfterClose: number = sessions.activeCount;
-    if (remainingAfterClose !== 0) throw new Error('Initial automation context leaked.');
+    const remainingAfterClose = () => sessions.activeCount;
+    if (remainingAfterClose() !== 0) throw new Error('Initial automation context leaked.');
     // Real MCP transport -> tool registration -> owner-bound Playwright context.
     // OAuth is tested separately: this local smoke supplies the verified actor
     // identity directly and does not open a public listener.
