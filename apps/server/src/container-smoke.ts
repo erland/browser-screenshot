@@ -3,6 +3,7 @@ import { InternalCaptureError } from './capture-errors.js';
 import { createAutomationSessionManager } from './automation-runtime.js';
 import { navigateAutomationContext, snapshotAutomationContext, fillAutomationControl, clickAutomationControl } from './automation-browser.js';
 import { createBrowserScreenshotMcpHandler } from './mcp.js';
+import http from 'node:http';
 
 function assertPng(buffer: Buffer): void {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -71,25 +72,52 @@ try {
     } finally {
       await redirectPage.close();
     }
-    // Exercise embedded navigation and WebSocket attempts in real Chromium.
-    // These are negative tests: a forbidden endpoint must never respond.
-    const isolationPage = await target.context.newPage();
+    // An actual loopback service proves blocked requests never arrive.
+    let inbound = 0;
+    const local = http.createServer((req, res) => {
+      inbound++;
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('PRIVATE-RESPONSE');
+    });
+    local.on('upgrade', (_request, socket) => {
+      inbound++;
+      socket.destroy();
+    });
+    await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve));
     try {
-      await isolationPage.setContent('<iframe id="private-frame" src="http://127.0.0.1:8080/health"></iframe>');
-      const iframe = isolationPage.frameLocator('#private-frame');
-      const iframeBody = await iframe.locator('body').textContent({ timeout: 5_000 }).catch(() => '');
-      if (iframeBody?.includes('"status":"ok"')) {
-        throw new Error('Iframe reached a private health endpoint.');
+      const address = local.address();
+      if (!address || typeof address === 'string') throw new Error('Missing private fixture address');
+      const privateUrl = 'http://127.0.0.1:' + address.port + '/private';
+      const privateWs = 'ws://127.0.0.1:' + address.port + '/private';
+      // Positive control: the local service really is reachable from this
+      // container, independently of the browser's security boundary.
+      const control = await fetch(privateUrl);
+      if ((await control.text()) !== 'PRIVATE-RESPONSE' || inbound !== 1) {
+        throw new Error('Private fixture positive control failed.');
       }
-      const socketResult = await isolationPage.evaluate(async () => new Promise<string>(resolve => {
-        const socket = new WebSocket('ws://127.0.0.1:8080/');
-        const timer = setTimeout(() => { socket.close(); resolve('timeout'); }, 2_000);
-        socket.onopen = () => { clearTimeout(timer); socket.close(); resolve('open'); };
-        socket.onerror = () => { clearTimeout(timer); resolve('blocked'); };
-      }));
-      if (socketResult === 'open') throw new Error('WebSocket reached private loopback.');
+      const isolationPage = await target.context.newPage();
+      try {
+        await isolationPage.setContent('<iframe id="private-frame" src="' + privateUrl + '"></iframe>');
+        const iframeBody = await isolationPage.frameLocator('#private-frame').locator('body')
+          .textContent({ timeout: 5_000 }).catch(() => '');
+        if (iframeBody?.includes('PRIVATE-RESPONSE')) {
+          throw new Error('Iframe reached a private fixture.');
+        }
+        const socketResult = await isolationPage.evaluate(async (url) => new Promise<string>(resolve => {
+          const socket = new WebSocket(url);
+          const timer = setTimeout(() => { socket.close(); resolve('timeout'); }, 2_000);
+          socket.onopen = () => { clearTimeout(timer); socket.close(); resolve('open'); };
+          socket.onerror = () => { clearTimeout(timer); resolve('blocked'); };
+        }), privateWs);
+        if (socketResult === 'open') throw new Error('Private WebSocket unexpectedly opened.');
+        // A zero-delta request counter is the decisive condition; a failed
+        // browser navigation alone might reflect a missing service.
+        if (inbound !== 1) throw new Error('Browser reached private fixture: ' + inbound + ' requests');
+      } finally {
+        await isolationPage.close();
+      }
     } finally {
-      await isolationPage.close();
+      await new Promise<void>((resolve, reject) => local.close(error => error ? reject(error) : resolve()));
     }
     // Exercise interaction against deterministic local markup in the *same*
     // already-authorized page; no loopback web server or external fixture.
