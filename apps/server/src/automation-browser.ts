@@ -86,6 +86,29 @@ export async function snapshotAutomationContext(target: SecuredAutomationContext
   return lines.join('\n').slice(0, 12_000);
 }
 
+/** Write actions must be explicitly scoped to trusted test origins.
+ * An empty allowlist is intentionally deny-by-default. */
+function assertWriteOrigin(target: SecuredAutomationContext): void {
+  const configured = (process.env.BROWSER_AUTOMATION_WRITE_ORIGINS ?? '')
+    .split(',').map(value => value.trim()).filter(Boolean);
+  let current: URL;
+  try {
+    current = new URL(target.page.url());
+  } catch {
+    throw new Error('WRITE_ORIGIN_NOT_ALLOWED');
+  }
+  if (current.protocol !== 'https:' ||
+      !configured.some(value => {
+        try {
+          const allowed = new URL(value);
+          return allowed.protocol === 'https:' && allowed.pathname === '/' &&
+            !allowed.search && !allowed.hash && allowed.origin === current.origin;
+        } catch { return false; }
+      })) {
+    throw new Error('WRITE_ORIGIN_NOT_ALLOWED');
+  }
+}
+
 /** Restrict interactions to a simple, bounded CSS selector for visible controls. */
 function controlLocator(target: SecuredAutomationContext, selector: string) {
   if (selector.length > 200 || !/^(?:#[a-zA-Z][\w-]*|\[data-testid="[a-zA-Z0-9_-]{1,80}"\])$/.test(selector)) {
@@ -95,6 +118,7 @@ function controlLocator(target: SecuredAutomationContext, selector: string) {
 }
 
 export async function clickAutomationControl(target: SecuredAutomationContext, selector: string): Promise<void> {
+  assertWriteOrigin(target);
   const element = controlLocator(target, selector);
   if (await element.count() !== 1) throw new Error('CONTROL_NOT_UNIQUE');
   await element.click({ timeout: 10_000 });
