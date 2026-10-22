@@ -167,8 +167,12 @@ BROWSER_AUTOMATION_WRITE_ORIGINS=https://your-test.preview.apphome.one
 
 Set `BROWSER_AUTOMATION_ENABLED=true` only in a controlled test environment.
 `BROWSER_AUTOMATION_WRITE_ORIGINS` is a comma-separated list of **exact HTTPS
-origins** (scheme, hostname and port). It is **not** a list of URL prefixes,
-paths, wildcard hostnames or IP ranges. Empty/unset means that `browser_click`
+origins** (scheme, hostname and port). A single restricted wildcard
+`https://*.preview.apphome.one` is also supported for HTTPS subdomains under
+the PWA Preview test domain (including nested subdomains, but **not** the apex
+`preview.apphome.one`, alternate ports or lookalike domains). No generic
+`*`, arbitrary wildcard domain, URL paths or IP ranges are supported.
+Empty/unset means that `browser_click`
 and `browser_fill` are denied. Navigation and snapshots remain subject to the
 existing network policy. Approval for an origin **does not** make its actions
 non-destructive: use disposable test data and require user authorization for
