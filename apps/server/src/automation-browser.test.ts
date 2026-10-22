@@ -65,6 +65,41 @@ describe('secure automation browser adapter', () => {
     else process.env.BROWSER_AUTOMATION_WRITE_ORIGINS = previousOrigins;
   });
 
+  it('checks the current page origin on every write after navigation or redirect', async () => {
+    const old = process.env.BROWSER_AUTOMATION_WRITE_ORIGINS;
+    process.env.BROWSER_AUTOMATION_WRITE_ORIGINS = 'https://allowed.example';
+    let currentUrl = 'https://allowed.example/form';
+    const click = vi.fn(async () => {});
+    const fill = vi.fn(async () => {});
+    const page = {
+      url: () => currentUrl,
+      locator: vi.fn(() => ({
+        count: async () => 1,
+        click,
+        fill,
+        evaluate: async () => 'input',
+        getAttribute: async () => 'text',
+      })),
+    };
+    try {
+      const target = { page } as never;
+      await clickAutomationControl(target, '#apply');
+      await fillAutomationControl(target, '#entry', 'before');
+      currentUrl = 'https://different.example/form';
+      await expect(clickAutomationControl(target, '#apply')).rejects.toThrow('WRITE_ORIGIN_NOT_ALLOWED');
+      await expect(fillAutomationControl(target, '#entry', 'after')).rejects.toThrow('WRITE_ORIGIN_NOT_ALLOWED');
+      currentUrl = 'https://allowed.example.evil.test/form';
+      await expect(clickAutomationControl(target, '#apply')).rejects.toThrow('WRITE_ORIGIN_NOT_ALLOWED');
+      currentUrl = 'http://allowed.example/form';
+      await expect(fillAutomationControl(target, '#entry', 'after')).rejects.toThrow('WRITE_ORIGIN_NOT_ALLOWED');
+      expect(click).toHaveBeenCalledTimes(1);
+      expect(fill).toHaveBeenCalledTimes(1);
+    } finally {
+      if (old === undefined) delete process.env.BROWSER_AUTOMATION_WRITE_ORIGINS;
+      else process.env.BROWSER_AUTOMATION_WRITE_ORIGINS = old;
+    }
+  });
+
   it('enforces network policy on every intercepted redirect and iframe request', async () => {
     let intercept!: (route: {
       request(): { url(): string };
