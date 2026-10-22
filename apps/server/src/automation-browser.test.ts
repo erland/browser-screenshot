@@ -59,4 +59,40 @@ describe('secure automation browser adapter', () => {
     await expect(fillAutomationControl(target, '#entry', 'x'.repeat(10_001))).rejects.toThrow('VALUE_TOO_LONG');
   });
 
+  it('enforces network policy on every intercepted redirect and iframe request', async () => {
+    let intercept!: (route: {
+      request(): { url(): string };
+      continue(): Promise<void>;
+      abort(reason: string): Promise<void>;
+    }) => Promise<void>;
+    const context = {
+      close: vi.fn(async () => {}),
+      route: vi.fn(async (_pattern: string, handler: typeof intercept) => { intercept = handler; }),
+      newPage: vi.fn(async () => ({
+        setDefaultTimeout: vi.fn(), setDefaultNavigationTimeout: vi.fn(),
+      })),
+    };
+    await createSecuredAutomationContext({ browser: { newContext: async () => context } } as never);
+    for (const blockedUrl of [
+      'http://127.0.0.1/internal',
+      'http://169.254.169.254/latest/meta-data/',
+      'http://localhost/admin',
+      'http://192.168.1.1/frame',
+      'file:///etc/passwd',
+      'http://[::1]/',
+    ]) {
+      const proceed = vi.fn(async () => {});
+      const abort = vi.fn(async () => {});
+      await intercept({ request: () => ({ url: () => blockedUrl }), continue: proceed, abort });
+      expect(abort).toHaveBeenCalledWith('blockedbyclient');
+      expect(proceed).not.toHaveBeenCalled();
+    }
+    const proceed = vi.fn(async () => {});
+    const abort = vi.fn(async () => {});
+    await intercept({ request: () => ({ url: () => 'https://1.1.1.1/public' }), continue: proceed, abort });
+    expect(proceed).toHaveBeenCalledOnce();
+    expect(abort).not.toHaveBeenCalled();
+    await context.close();
+  });
+
 });
