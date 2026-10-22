@@ -126,6 +126,7 @@ export async function clickAutomationControl(target: SecuredAutomationContext, s
 
 export async function fillAutomationControl(target: SecuredAutomationContext, selector: string, value: string): Promise<void> {
   if (value.length > 10_000) throw new Error('VALUE_TOO_LONG');
+  assertWriteOrigin(target);
   const element = controlLocator(target, selector);
   if (await element.count() !== 1) throw new Error('CONTROL_NOT_UNIQUE');
   const tag = await element.evaluate(node => node.tagName.toLowerCase());
