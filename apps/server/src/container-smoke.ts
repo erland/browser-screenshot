@@ -1,6 +1,7 @@
 import { captureWithFreshContext, launchScreenshotBrowser } from './browser.js';
 import { InternalCaptureError } from './capture-errors.js';
-import { createAutomationSessionManager } from './automation-runtime.js';
+import { createAutomationSessionManager, createLeasedAutomationSessionManager } from './automation-runtime.js';
+import { ScreenshotResourceController } from './resource-controls.js';
 import { navigateAutomationContext, snapshotAutomationContext, fillAutomationControl, clickAutomationControl } from './automation-browser.js';
 import { createBrowserScreenshotMcpHandler } from './mcp.js';
 import http from 'node:http';
@@ -260,6 +261,40 @@ try {
     if (remainingAfterClose() !== 0) throw new Error('Automation context leaked.');
   } finally {
     await sessions.shutdown();
+  }
+
+  // Production composition: automation leases and screenshot jobs must share
+  // the actual ScreenshotResourceController, not just a Browser instance.
+  const sharedResources = new ScreenshotResourceController({
+    maxConcurrent: 3, rateLimitPerMinute: 20, maxJobsPerBrowser: 1,
+    maxQueued: 3, queueTimeoutMs: 30_000,
+  });
+  const sharedSessions = createLeasedAutomationSessionManager(sharedResources, { enabled: () => true });
+  try {
+    const a = await sharedSessions.create('load-actor-a');
+    const b = await sharedSessions.create('load-actor-b');
+    const pageA = sharedSessions.get('load-actor-a', a.id).context.page;
+    const pageB = sharedSessions.get('load-actor-b', b.id).context.page;
+    await pageA.setContent('<title>Lease A</title><h1>First session</h1>');
+    await pageB.setContent('<title>Lease B</title><h1>Second session</h1>');
+    const work = Array.from({ length: 3 }, (_, index) => sharedResources.run('load-' + index, {
+      url: process.env.SMOKE_PUBLIC_URL ?? 'https://example.com',
+      width: 480, height: 320, deviceScaleFactor: 1, fullPage: false, timeoutMs: 20_000,
+    }));
+    const outcomes = await Promise.all(work);
+    for (const outcome of outcomes) assertPng(outcome.png);
+    if (await pageA.title() !== 'Lease A' || await pageB.title() !== 'Lease B') {
+      throw new Error('Shared resource controller invalidated an active automation context.');
+    }
+    if (sharedSessions.activeCount !== 2) {
+      throw new Error('Shared controller lost automation session capacity.');
+    }
+    await sharedSessions.close('load-actor-a', a.id);
+    await sharedSessions.close('load-actor-b', b.id);
+    if (sharedSessions.activeCount !== 0) throw new Error('Shared controller leaked automation leases.');
+  } finally {
+    await sharedSessions.shutdown();
+    await sharedResources.close();
   }
 
   process.stdout.write(`container-smoke: PASS (sandbox-required Chromium, ${result.png.byteLength} byte PNG)\n`);
