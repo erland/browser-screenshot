@@ -49,7 +49,9 @@ describe('secure automation browser adapter', () => {
       evaluate: async () => 'input',
       getAttribute: async () => 'text',
     }));
-    const target = { page: { locator } } as never;
+    const previousOrigins = process.env.BROWSER_AUTOMATION_WRITE_ORIGINS;
+    process.env.BROWSER_AUTOMATION_WRITE_ORIGINS = 'https://example.com';
+    const target = { page: { locator, url: () => 'https://example.com/form' } } as never;
     await clickAutomationControl(target, '#apply');
     await fillAutomationControl(target, '#entry', 'hello');
     await clickAutomationControl(target, '[data-testid="save-button"]');
@@ -57,6 +59,10 @@ describe('secure automation browser adapter', () => {
     expect(fill).toHaveBeenCalledWith('hello', { timeout: 10_000 });
     await expect(clickAutomationControl(target, 'body button')).rejects.toThrow('INVALID_CONTROL_SELECTOR');
     await expect(fillAutomationControl(target, '#entry', 'x'.repeat(10_001))).rejects.toThrow('VALUE_TOO_LONG');
+    process.env.BROWSER_AUTOMATION_WRITE_ORIGINS = '';
+    await expect(clickAutomationControl(target, '#apply')).rejects.toThrow('WRITE_ORIGIN_NOT_ALLOWED');
+    if (previousOrigins === undefined) delete process.env.BROWSER_AUTOMATION_WRITE_ORIGINS;
+    else process.env.BROWSER_AUTOMATION_WRITE_ORIGINS = previousOrigins;
   });
 
   it('enforces network policy on every intercepted redirect and iframe request', async () => {
