@@ -60,7 +60,7 @@ export async function snapshotAutomationContext(target: SecuredAutomationContext
   const lines: string[] = [];
   const title = (await page.title()).slice(0, 240);
   lines.push('URL: ' + page.url().slice(0, 2048), 'Title: ' + title);
-  const elements = page.locator('h1,h2,h3,a,button,input,textarea,select,[role="button"]');
+  const elements = page.locator('h1,h2,h3,a,button,input,textarea,select,output,[role="button"],[role="status"],[role="alert"],[aria-live]');
   const count = Math.min(await elements.count(), 100);
   for (let index = 0; index < count; index++) {
     const element = elements.nth(index);
@@ -69,6 +69,9 @@ export async function snapshotAutomationContext(target: SecuredAutomationContext
       ? (await element.getAttribute('aria-label')) ?? (await element.getAttribute('placeholder')) ?? ''
       : (await element.innerText().catch(() => ''));
     const type = tag === 'input' ? (await element.getAttribute('type')) ?? 'text' : tag;
+    const role = await element.getAttribute('role');
+    const kind = role === 'status' || role === 'alert' ? role : tag === 'output' ? 'output' : type;
+    const live = await element.getAttribute('aria-live');
     const href = tag === 'a' ? (await element.getAttribute('href')) ?? '' : '';
     const id = await element.getAttribute('id');
     const testId = await element.getAttribute('data-testid');
@@ -78,7 +81,8 @@ export async function snapshotAutomationContext(target: SecuredAutomationContext
         ? '[data-testid="' + testId + '"]'
         : '';
     const availableSelector = selector && await page.locator(selector).count() === 1 ? selector : '';
-    lines.push('[' + index + '] ' + type + ': ' + label.replace(/\s+/g, ' ').slice(0, 200) +
+    lines.push('[' + index + '] ' + kind + ': ' + label.replace(/\s+/g, ' ').slice(0, 200) +
+      (live && ['polite', 'assertive'].includes(live) ? ' | aria-live: ' + live : '') +
       (availableSelector ? ' | selector: ' + availableSelector : '') +
       (href ? ' -> ' + href.slice(0, 300) : ''));
     if (lines.join('\n').length > 12_000) break;
