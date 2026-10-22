@@ -84,7 +84,7 @@ describe('automation session manager (private PoC foundation)', () => {
     await Promise.resolve();
     expect(events).toEqual(['first-start']);
     expect(close).not.toHaveBeenCalled();
-    await expect(manager.run('a', session.id, async () => {})).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(() => manager.run('a', session.id, async () => {})).toThrow('NOT_FOUND');
     release();
     await Promise.all([first, second, closing]);
     expect(events).toEqual(['first-start', 'first-end', 'second', 'closed']);
