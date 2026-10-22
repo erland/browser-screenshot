@@ -2,7 +2,7 @@ import { captureWithFreshContext, launchScreenshotBrowser } from './browser.js';
 import { InternalCaptureError } from './capture-errors.js';
 import { createAutomationSessionManager, createLeasedAutomationSessionManager } from './automation-runtime.js';
 import { ScreenshotResourceController } from './resource-controls.js';
-import { navigateAutomationContext, snapshotAutomationContext, fillAutomationControl, clickAutomationControl } from './automation-browser.js';
+import { navigateAutomationContext, snapshotAutomationContext, fillAutomationControl, clickAutomationControl, screenshotAutomationContext } from './automation-browser.js';
 import { createBrowserScreenshotMcpHandler, registerMcpRoute } from './mcp.js';
 import Fastify from 'fastify';
 import http from 'node:http';
@@ -170,6 +170,10 @@ try {
     if ((await target.page.locator('#result').textContent()) !== 'verified-input') {
       throw new Error('Chromium form interaction did not update the page.');
     }
+    const capturedState = await screenshotAutomationContext(target);
+    assertPng(capturedState);
+    const fullPageState = await screenshotAutomationContext(target, true);
+    assertPng(fullPageState);
     const afterInteraction = await snapshotAutomationContext(target);
     if (!afterInteraction.includes('output: verified-input')) {
       throw new Error('Semantic snapshot did not report the updated output.');
