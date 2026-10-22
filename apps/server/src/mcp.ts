@@ -1,4 +1,6 @@
 import type { IncomingMessage } from 'node:http';
+import { z } from 'zod';
+import { automationEnabled } from './automation-sessions.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { FastifyInstance } from 'fastify';
 import { McpServer, createMcpHandler, type AuthInfo } from '@modelcontextprotocol/server';
@@ -14,9 +16,19 @@ const BROWSER_SCREENSHOT_DESCRIPTION =
 const BROWSER_SCREENSHOT_WEBSITE = 'https://browser-screenshot.apphome.one/about';
 const BROWSER_SCREENSHOT_ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABJklEQVR4nO2bwQ3CMBAECeLLD0ERlEIN0AD10AA1hFIogirghRShQMzZZix25x3h0eicOJHo1vv+PhNmTgvQOAAtQOMAtACNA9ACNA5AC9A4AC1A4wC0AM0i9cLraVfTowrb42XyGvkJcABagMYBaAEaB6AFaJLPAatlTQ0O+QmQD5C8BcbYHMaPmrdzvWNz6TXDE/BOhCLq4y1Q4kdqjvzUWrmTKD8BDkAL0ITvAb/c95/I9ZCfAAegBWgcgBagCT8Fhicw8omQ6yE/AQ5AC9AUeRt8fSMjPohEkZ+AcIBW3gWeRH2ytgARofSayRPQ2jfAKVJ95e8BXeT/Aq3t/yHfTmoowD8hvwUcgBagcQBagMYBaAEaB6AFaByAFqBxAFqARj7AA03iMc36yblqAAAAAElFTkSuQmCC';
 
+export interface McpAutomationSessions {
+  create(owner: string): Promise<{ id: string; createdAt: number }>;
+  close(owner: string, id: string): Promise<void>;
+  navigate?(owner: string, id: string, url: string): Promise<void>;
+  snapshot?(owner: string, id: string): Promise<string>;
+  click?(owner: string, id: string, selector: string): Promise<void>;
+  fill?(owner: string, id: string, selector: string, value: string): Promise<void>;
+}
+
 export function createBrowserScreenshotMcpHandler(
   capability: Pick<ScreenshotCapability, 'capture'>,
   actorKeyProvider: () => string | undefined = () => undefined,
+  automation?: McpAutomationSessions,
 ) {
   return createMcpHandler(() => {
     const server = new McpServer({
@@ -110,6 +122,102 @@ export function createBrowserScreenshotMcpHandler(
         }
       },
     );
+    // Both conditions are mandatory: explicit configuration and a provisioned,
+    // application-owned session service. Missing configuration exposes no tools.
+    if (automation && automationEnabled()) {
+      server.registerTool('browser_session_create', {
+        description: 'Create an isolated browser session for interactive testing.',
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      }, async () => {
+        const owner = actorKeyProvider();
+        if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+        try {
+          const created = await automation.create(owner);
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ sessionId: created.id }) }] };
+        } catch {
+          return { isError: true, content: [{ type: 'text' as const, text: 'SESSION_UNAVAILABLE' }] };
+        }
+      });
+      if (automation.navigate) {
+        server.registerTool('browser_navigate', {
+          description: 'Navigate an existing, caller-owned browser session to a public HTTP(S) URL.',
+          inputSchema: z.object({ sessionId: z.string().uuid(), url: z.string().url().max(2048) }),
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        }, async ({ sessionId, url }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            await automation.navigate!(owner, sessionId, url);
+            return { content: [{ type: 'text' as const, text: JSON.stringify({ navigated: true, url }) }] };
+          } catch {
+            return { isError: true, content: [{ type: 'text' as const, text: 'NAVIGATION_UNAVAILABLE' }] };
+          }
+        });
+      }
+      if (automation.snapshot) {
+        server.registerTool('browser_snapshot', {
+          description: 'Read a bounded semantic overview of a caller-owned browser page.',
+          inputSchema: z.object({ sessionId: z.string().uuid() }),
+          annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        }, async ({ sessionId }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            const snapshot = await automation.snapshot!(owner, sessionId);
+            return { content: [{ type: 'text' as const, text: snapshot }] };
+          } catch {
+            return { isError: true, content: [{ type: 'text' as const, text: 'SNAPSHOT_UNAVAILABLE' }] };
+          }
+        });
+      }
+      if (automation.click) {
+        server.registerTool('browser_click', {
+          description: 'Click a uniquely identified control on an external website. Clicking can submit forms, change data, or trigger destructive actions; obtain user authorization for consequential actions. Only ID and data-testid selectors are supported.',
+          inputSchema: z.object({ sessionId: z.string().uuid(), selector: z.string().min(2).max(200) }),
+          annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+        }, async ({ sessionId, selector }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            await automation.click!(owner, sessionId, selector);
+            return { content: [{ type: 'text' as const, text: JSON.stringify({ clicked: true }) }] };
+          } catch {
+            return { isError: true, content: [{ type: 'text' as const, text: 'CLICK_UNAVAILABLE' }] };
+          }
+        });
+      }
+      if (automation.fill) {
+        server.registerTool('browser_fill', {
+          description: 'Fill a single text control in a caller-owned browser session. Password and file inputs are not supported.',
+          inputSchema: z.object({ sessionId: z.string().uuid(), selector: z.string().min(2).max(200), value: z.string().max(10000) }),
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        }, async ({ sessionId, selector, value }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            await automation.fill!(owner, sessionId, selector, value);
+            return { content: [{ type: 'text' as const, text: JSON.stringify({ filled: true }) }] };
+          } catch {
+            return { isError: true, content: [{ type: 'text' as const, text: 'FILL_UNAVAILABLE' }] };
+          }
+        });
+      }
+      server.registerTool('browser_session_close', {
+        description: 'Close a browser session owned by the authenticated caller.',
+        inputSchema: z.object({ sessionId: z.string().uuid() }),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      }, async ({ sessionId }) => {
+        const owner = actorKeyProvider();
+        if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+        try {
+          await automation.close(owner, sessionId);
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ closed: true }) }] };
+        } catch {
+          return { isError: true, content: [{ type: 'text' as const, text: 'SESSION_NOT_FOUND' }] };
+        }
+      });
+    }
     return server;
   });
 }
@@ -124,9 +232,10 @@ export async function registerMcpRoute(
   app: FastifyInstance,
   oauth: McpOAuthManager,
   capability: Pick<ScreenshotCapability, 'capture'>,
+  automation?: McpAutomationSessions,
 ): Promise<() => Promise<void>> {
   const actorContext = new AsyncLocalStorage<string>();
-  const handler = createBrowserScreenshotMcpHandler(capability, () => actorContext.getStore());
+  const handler = createBrowserScreenshotMcpHandler(capability, () => actorContext.getStore(), automation);
   const nodeHandler = toNodeHandler(handler);
 
   app.route({

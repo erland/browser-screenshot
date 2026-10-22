@@ -30,6 +30,8 @@ export class ScreenshotResourceController {
   private browser: ScreenshotBrowser | null = null;
   private jobsOnBrowser = 0;
   private launching: Promise<ScreenshotBrowser> | null = null;
+  private browserLeases = 0;
+  private retiring: Promise<void> | null = null;
 
   constructor(
     private readonly config: ResourceControlConfig = DEFAULT_RESOURCE_CONTROL_CONFIG,
@@ -86,7 +88,7 @@ export class ScreenshotResourceController {
 
   private async getBrowser(): Promise<ScreenshotBrowser> {
     if (this.browser && this.jobsOnBrowser < this.config.maxJobsPerBrowser) return this.browser;
-    if (this.browser && this.active <= 1) {
+    if (this.browser && this.active <= 1 && this.browserLeases === 0) {
       await this.browser.close();
       this.browser = null;
       this.jobsOnBrowser = 0;
@@ -99,6 +101,48 @@ export class ScreenshotResourceController {
     } finally {
       this.launching = null;
     }
+  }
+
+  /** Reserve browser capacity for the lifetime of an interactive context.
+   * A lease prevents screenshot-driven Chromium recycling until released.
+   * The lease must only be exposed after the same authorization/security checks
+   * required for screenshot operations.
+   */
+  async acquireBrowserLease(): Promise<{ browser: ScreenshotBrowser; release(): Promise<void> }> {
+    await this.acquireSlot();
+    let released = false;
+    try {
+      const browser = await this.getBrowser();
+      this.browserLeases++;
+      return {
+        browser,
+        release: async () => {
+          if (released) return;
+          released = true;
+          this.browserLeases--;
+          this.releaseSlot();
+          await this.retireBrowserIfIdle();
+        },
+      };
+    } catch (error) {
+      this.releaseSlot();
+      throw error;
+    }
+  }
+
+  private async retireBrowserIfIdle(): Promise<void> {
+    if (this.retiring) return this.retiring;
+    if (!this.browser || this.browserLeases !== 0 || this.active !== 0 ||
+        this.jobsOnBrowser < this.config.maxJobsPerBrowser) return;
+    const browser = this.browser;
+    this.retiring = (async () => {
+      await browser.close();
+      if (this.browser === browser) {
+        this.browser = null;
+        this.jobsOnBrowser = 0;
+      }
+    })().finally(() => { this.retiring = null; });
+    return this.retiring;
   }
 
   async run(actorKey: string, request: NormalizedScreenshotRequest): Promise<ScreenshotResult> {
@@ -125,11 +169,7 @@ export class ScreenshotResourceController {
       }
     } finally {
       this.releaseSlot();
-      if (this.browser && this.jobsOnBrowser >= this.config.maxJobsPerBrowser && this.active === 0) {
-        await this.browser.close();
-        this.browser = null;
-        this.jobsOnBrowser = 0;
-      }
+      await this.retireBrowserIfIdle();
     }
   }
 

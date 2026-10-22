@@ -10,6 +10,10 @@ import { registerAuthRoutes } from './auth-routes.js';
 import type { McpOAuthManager } from './oauth.js';
 import { registerMcpOAuthRoutes } from './oauth.js';
 import { registerMcpRoute } from './mcp.js';
+import { automationEnabled } from './automation-sessions.js';
+import { createLeasedAutomationSessionManager } from './automation-runtime.js';
+import { navigateAutomationContext, snapshotAutomationContext, clickAutomationControl, fillAutomationControl } from './automation-browser.js';
+import { ScreenshotResourceController } from './resource-controls.js';
 import {
   DefaultScreenshotCapability,
   type ScreenshotCapability,
@@ -38,8 +42,32 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   registerSecurityHooks(app, { hsts: options.hsts });
 
-  const screenshotCapability = options.screenshotCapability ?? new DefaultScreenshotCapability();
-  app.addHook('onClose', async () => { await screenshotCapability.close(); });
+  // Automation and screenshot rendering must use the SAME resource controller.
+  // Injected test capabilities deliberately do not enable automation.
+  const sharedResources = !options.screenshotCapability && options.mcpOAuth && automationEnabled()
+    ? new ScreenshotResourceController()
+    : undefined;
+  const screenshotCapability = options.screenshotCapability ??
+    new DefaultScreenshotCapability(sharedResources);
+  const automation = sharedResources
+    ? createLeasedAutomationSessionManager(sharedResources)
+    : undefined;
+  // Reap idle and absolute-expired contexts even without incoming MCP calls.
+  // A detached client must not retain a Chromium lease indefinitely.
+  const reapTimer = automation ? setInterval(() => {
+    void automation.reap().catch(error => app.log.warn({ err: error }, 'Automation cleanup failed'));
+  }, 30_000) : undefined;
+  reapTimer?.unref();
+
+  // Close interactive contexts before their underlying Chromium/browser owner.
+  app.addHook('onClose', async () => {
+    if (reapTimer) clearInterval(reapTimer);
+    try {
+      await automation?.shutdown();
+    } finally {
+      await screenshotCapability.close();
+    }
+  });
 
   await registerPublicInfo(app);
 
@@ -58,7 +86,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   if (options.auth) await registerAuthRoutes(app, options.auth);
   if (options.mcpOAuth) {
     await registerMcpOAuthRoutes(app, options.mcpOAuth);
-    const closeMcp = await registerMcpRoute(app, options.mcpOAuth, screenshotCapability);
+    const closeMcp = await registerMcpRoute(app, options.mcpOAuth, screenshotCapability, automation ? {
+      create: (owner) => automation.create(owner),
+      close: (owner, id) => automation.close(owner, id),
+      navigate: (owner, id, url) => automation.run(owner, id, context => navigateAutomationContext(context, url)),
+      snapshot: (owner, id) => automation.run(owner, id, context => snapshotAutomationContext(context)),
+      click: (owner, id, selector) => automation.run(owner, id, context => clickAutomationControl(context, selector)),
+      fill: (owner, id, selector, value) => automation.run(owner, id, context => fillAutomationControl(context, selector, value)),
+    } : undefined);
     app.addHook('onClose', async () => { await closeMcp(); });
   }
 

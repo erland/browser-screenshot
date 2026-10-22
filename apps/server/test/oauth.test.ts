@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { registerMcpRoute } from '../src/mcp.js';
 import { McpOAuthManager, pkceS256, registerMcpOAuthRoutes, type OAuthCodeRecord, type OAuthRefreshRecord, type OAuthStore } from '../src/oauth.js';
 
 function createStore() {
@@ -46,6 +48,16 @@ describe('MCP OAuth', () => {
     const app = Fastify();
     await registerMcpOAuthRoutes(app, oauth);
 
+    const oldFlag = process.env.BROWSER_AUTOMATION_ENABLED;
+    process.env.BROWSER_AUTOMATION_ENABLED = 'true';
+    const created: string[] = [];
+    const closed: string[] = [];
+    const sessionId = 'd97d2801-58d8-4c9e-8882-55de89bb45fb';
+    const closeMcp = await registerMcpRoute(app, oauth, { capture: async () => { throw Error('not used'); } }, {
+      create: async (actor) => { created.push(actor); return { id: sessionId, createdAt: Date.now() }; },
+      close: async (actor, id) => { closed.push(actor + ':' + id); },
+    });
+
     const prm = await app.inject({ method: 'GET', url: '/.well-known/oauth-protected-resource/mcp' });
     expect(prm.statusCode).toBe(200);
     expect(prm.json().resource).toBe('https://screenshots.example.test/mcp');
@@ -87,6 +99,44 @@ describe('MCP OAuth', () => {
     const accessToken = token.json().access_token as string;
     expect(token.json().refresh_token).toBeTruthy();
     expect((await oauth.verifyBearer(`Bearer ${accessToken}`))?.email).toBe('allowed@example.test');
+
+    let client: Client | undefined;
+    try {
+      await app.listen({ host: '127.0.0.1', port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === 'string') throw Error('Expected TCP server address');
+      const transport = new StreamableHTTPClientTransport(
+        new URL('http://127.0.0.1:' + address.port + '/mcp'),
+        { requestInit: { headers: { authorization: 'Bearer ' + accessToken } } },
+      );
+      client = new Client({ name: 'oauth-issued-mcp-test', version: '1.0.0' });
+      await client.connect(transport);
+      const tools = (await client.listTools()).tools.map(t => t.name);
+      expect(tools).toContain('browser_session_create');
+      const result = await client.callTool({ name: 'browser_session_create', arguments: {} });
+      expect(result.isError).not.toBe(true);
+      expect(created).toEqual(['allowed@example.test']);
+      // Revoke authorization while the browser session still exists.
+      // Every new MCP HTTP request must revalidate the bearer and deny access.
+      store.setAllowed(false);
+      const revoked = await app.inject({
+        method: 'POST', url: '/mcp',
+        headers: { authorization: 'Bearer ' + accessToken },
+        payload: { jsonrpc: '2.0', id: 99, method: 'tools/call',
+          params: { name: 'browser_session_close', arguments: { sessionId } } },
+      });
+      expect(revoked.statusCode).toBe(401);
+      expect(closed).toEqual([]);
+      store.setAllowed(true);
+      const end = await client.callTool({ name: 'browser_session_close', arguments: { sessionId } });
+      expect(end.isError).not.toBe(true);
+      expect(closed).toEqual(['allowed@example.test:' + sessionId]);
+    } finally {
+      await client?.close();
+      await closeMcp();
+      if (oldFlag === undefined) delete process.env.BROWSER_AUTOMATION_ENABLED;
+      else process.env.BROWSER_AUTOMATION_ENABLED = oldFlag;
+    }
 
     store.setAllowed(false);
     expect(await oauth.verifyBearer(`Bearer ${accessToken}`)).toBeNull();

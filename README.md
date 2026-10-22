@@ -151,3 +151,61 @@ npm run release:gate
 ```
 
 The helper is now independent of image publication: a GitHub Release builds and publishes its GHCR image directly, while the operator can apply the stricter GO/NO-GO gate when appropriate.
+
+
+## Experimental interactive browser automation (C-001)
+
+The existing OAuth-protected `/mcp` route can expose feature-gated Playwright
+session tools. **The feature is disabled by default.** A build or merge does not
+enable interactive browsing.
+
+```env
+BROWSER_AUTOMATION_ENABLED=false
+# Configure only for a disposable, controlled test site when explicitly testing:
+BROWSER_AUTOMATION_WRITE_ORIGINS=https://your-test.preview.apphome.one
+```
+
+Set `BROWSER_AUTOMATION_ENABLED=true` only in a controlled test environment.
+`BROWSER_AUTOMATION_WRITE_ORIGINS` is a comma-separated list of **exact HTTPS
+origins** (scheme, hostname and port). A single restricted wildcard
+`https://*.preview.apphome.one` is also supported for HTTPS subdomains under
+the PWA Preview test domain (including nested subdomains, but **not** the apex
+`preview.apphome.one`, alternate ports or lookalike domains). No generic
+`*`, arbitrary wildcard domain, URL paths or IP ranges are supported.
+Empty/unset means that `browser_click`
+and `browser_fill` are denied. Navigation and snapshots remain subject to the
+existing network policy. Approval for an origin **does not** make its actions
+non-destructive: use disposable test data and require user authorization for
+consequential actions.
+
+Automation is limited to two global sessions and one per actor, with a
+five-minute idle and fifteen-minute absolute lifetime. A periodic reaper
+closes expired contexts. Automation contexts share Chromium screenshot
+capacity and can reduce available screenshot throughput. The process
+must be restarted to switch the startup feature integration on or off.
+
+### C-001 release and rollback
+
+1. Merge/release with `BROWSER_AUTOMATION_ENABLED=false`. Verify ordinary
+   screenshots and MCP remain functional; do not expose interactive tools.
+2. For a later manual acceptance test, deploy to an isolated environment,
+   set an exact disposable test origin and enable the flag. Authenticate
+   through OAuth and exercise create, navigate, snapshot, fill, click, close,
+   cross-owner denial and session expiration. Do **not** use a real account
+   or destructive production workflows.
+3. Inspect CPU/memory, screenshot queue, OAuth denials and browser context
+   cleanup during the test. If abnormal behavior occurs, set
+   `BROWSER_AUTOMATION_ENABLED=false` **and restart the service** to disable
+   the experimental tools. Treat leaked Chromium contexts as requiring
+   process restart; a failed context close intentionally retains its lease
+   rather than reporting a free slot.
+
+The existing `scripts/verify-acceptance.sh` is a **remote integration suite**,
+not a CI-safe offline test. It requires a running deployment,
+`BASE_URL`, `REST_COOKIE` and `MCP_ACCESS_TOKEN` (and optional
+`PUBLIC_URL`). Never commit these credentials or print them into CI logs.
+Without those inputs, do not report that remote acceptance passed.
+The code-level CI/container smoke tests are distinct from the manual deployed
+end-to-end acceptance deferred until after release.
+
+Implementation and open risk evidence: `docs/changes/c-001-playwright-hybrid-spike.md`.

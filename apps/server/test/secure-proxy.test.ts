@@ -2,6 +2,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { describe, expect, it } from 'vitest';
 import { startSecureProxy } from '../src/secure-proxy.js';
+import { validatePublicUrl } from '../src/network-policy.js';
 
 function proxyHttpStatus(proxyUrl: string, absoluteUrl: string): Promise<number> {
   const proxy = new URL(proxyUrl);
@@ -55,4 +56,25 @@ describe('secure proxy', () => {
       await proxy.close();
     }
   });
+  it('blocks DNS rebinding from public to private address for HTTP and CONNECT', async () => {
+    let lookups = 0;
+    const resolver = async (hostname: string): Promise<string[]> => {
+      expect(hostname).toBe('rebinding.example.test');
+      lookups++;
+      return lookups === 1 ? ['1.1.1.1'] : ['127.0.0.1'];
+    };
+    const proxy = await startSecureProxy(resolver);
+    try {
+      // Positive control: the same resolver initially points to a public IP.
+      const initial = await validatePublicUrl('http://rebinding.example.test/', resolver);
+      expect(initial.selectedAddress).toBe('1.1.1.1');
+      // The proxy must resolve again and reject the now-private address.
+      await expect(proxyHttpStatus(proxy.url, 'http://rebinding.example.test/private')).resolves.toBe(403);
+      await expect(proxyConnectStatus(proxy.url, 'rebinding.example.test:443')).resolves.toContain('403 Forbidden');
+      expect(lookups).toBe(3);
+    } finally {
+      await proxy.close();
+    }
+  });
+
 });
