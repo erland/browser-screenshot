@@ -2,6 +2,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { describe, expect, it } from 'vitest';
 import { startSecureProxy } from '../src/secure-proxy.js';
+import { validatePublicUrl } from '../src/network-policy.js';
 
 function proxyHttpStatus(proxyUrl: string, absoluteUrl: string): Promise<number> {
   const proxy = new URL(proxyUrl);
