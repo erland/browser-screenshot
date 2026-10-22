@@ -47,4 +47,42 @@ describe('automation capacity and Chromium recycle coordination', () => {
     await expect(sessions.create('actor')).rejects.toThrow('context failed');
     expect(release).toHaveBeenCalledOnce();
   });
+  it('shares three slots between two automation leases and concurrent screenshots', async () => {
+    const browserClose = vi.fn(async () => {});
+    const launcher = vi.fn(async () => ({ browser: {} as never, proxy: {} as never, close: browserClose }));
+    let started!: () => void;
+    const captured = new Promise<void>(resolve => { started = resolve; });
+    let finish!: () => void;
+    const hold = new Promise<void>(resolve => { finish = resolve; });
+    const capture = vi.fn(async () => {
+      started();
+      await hold;
+      return { png: Buffer.from('png'), contextMarker: 'a', width: 800, height: 600 };
+    });
+    const resources = new ScreenshotResourceController({
+      maxConcurrent: 3, maxQueued: 1, queueTimeoutMs: 1000,
+      rateLimitPerMinute: 20, maxJobsPerBrowser: 1,
+    }, launcher, capture);
+    const request = { url: 'https://example.org', width: 800, height: 600, deviceScaleFactor: 1, fullPage: false, timeoutMs: 1000 };
+    const first = await resources.acquireBrowserLease();
+    const second = await resources.acquireBrowserLease();
+    const screenshot = resources.run('a', request);
+    await captured;
+    const queued = resources.run('b', request);
+    await expect(resources.run('c', request)).rejects.toMatchObject({ code: 'CAPACITY_EXCEEDED' });
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(launcher).toHaveBeenCalledOnce();
+    expect(browserClose).not.toHaveBeenCalled();
+    finish();
+    await screenshot;
+    await queued;
+    expect(capture).toHaveBeenCalledTimes(2);
+    expect(browserClose).not.toHaveBeenCalled();
+    await first.release();
+    expect(browserClose).not.toHaveBeenCalled();
+    await second.release();
+    expect(browserClose).toHaveBeenCalledOnce();
+    await resources.close();
+  });
+
 });
