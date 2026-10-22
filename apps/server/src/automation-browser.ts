@@ -90,6 +90,15 @@ export async function snapshotAutomationContext(target: SecuredAutomationContext
   return lines.join('\n').slice(0, 12_000);
 }
 
+/** Capture the current rendered page without navigating or creating a new context. */
+export async function screenshotAutomationContext(
+  target: SecuredAutomationContext, fullPage = false,
+): Promise<Buffer> {
+  const png = await target.page.screenshot({ type: 'png', fullPage, timeout: 10_000, animations: 'disabled' });
+  if (png.byteLength > 8 * 1024 * 1024) throw new Error('SESSION_SCREENSHOT_TOO_LARGE');
+  return png;
+}
+
 /** Write actions must be explicitly scoped to trusted test origins.
  * An empty allowlist is intentionally deny-by-default. */
 function assertWriteOrigin(target: SecuredAutomationContext): void {

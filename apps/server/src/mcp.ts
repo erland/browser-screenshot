@@ -21,6 +21,7 @@ export interface McpAutomationSessions {
   close(owner: string, id: string): Promise<void>;
   navigate?(owner: string, id: string, url: string): Promise<void>;
   snapshot?(owner: string, id: string): Promise<string>;
+  screenshot?(owner: string, id: string, fullPage: boolean): Promise<Buffer>;
   click?(owner: string, id: string, selector: string): Promise<void>;
   fill?(owner: string, id: string, selector: string, value: string): Promise<void>;
 }
@@ -168,6 +169,25 @@ export function createBrowserScreenshotMcpHandler(
             return { content: [{ type: 'text' as const, text: snapshot }] };
           } catch {
             return { isError: true, content: [{ type: 'text' as const, text: 'SNAPSHOT_UNAVAILABLE' }] };
+          }
+        });
+      }
+      if (automation.screenshot) {
+        server.registerTool('browser_session_screenshot', {
+          description: 'Capture a PNG of the current page in an existing caller-owned browser session, preserving prior interactions.',
+          inputSchema: z.object({ sessionId: z.string().uuid(), fullPage: z.boolean().optional().default(false) }),
+          annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        }, async ({ sessionId, fullPage }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            const png = await automation.screenshot!(owner, sessionId, fullPage);
+            return { content: [
+              { type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' },
+              { type: 'text' as const, text: JSON.stringify({ format: 'png', fullPage, sizeBytes: png.byteLength }) },
+            ] };
+          } catch {
+            return { isError: true, content: [{ type: 'text' as const, text: 'SESSION_SCREENSHOT_UNAVAILABLE' }] };
           }
         });
       }
