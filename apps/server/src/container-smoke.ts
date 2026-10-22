@@ -3,7 +3,8 @@ import { InternalCaptureError } from './capture-errors.js';
 import { createAutomationSessionManager, createLeasedAutomationSessionManager } from './automation-runtime.js';
 import { ScreenshotResourceController } from './resource-controls.js';
 import { navigateAutomationContext, snapshotAutomationContext, fillAutomationControl, clickAutomationControl } from './automation-browser.js';
-import { createBrowserScreenshotMcpHandler } from './mcp.js';
+import { createBrowserScreenshotMcpHandler, registerMcpRoute } from './mcp.js';
+import Fastify from 'fastify';
 import http from 'node:http';
 
 function assertPng(buffer: Buffer): void {
@@ -296,6 +297,67 @@ try {
   } finally {
     await sharedSessions.shutdown();
     await sharedResources.close();
+  }
+
+  // Real Chromium + protected MCP HTTP route + verified bearer actor. This
+  // exercises the auth boundary and browser together (token issuance/PKCE
+  // remains covered separately by oauth.test.ts).
+  const oldAuthFlag = process.env.BROWSER_AUTOMATION_ENABLED;
+  process.env.BROWSER_AUTOMATION_ENABLED = 'true';
+  const securedSessions = createAutomationSessionManager(browser, { enabled: () => true });
+  const authApp = Fastify();
+  const authCreate = async (owner: string) => securedSessions.create(owner);
+  const closeAuthenticatedMcp = await registerMcpRoute(authApp, {
+    verifyBearer: async (header?: string) => header === 'Bearer smoke-authorized'
+      ? { email: 'authorized@example.test', clientId: 'smoke-client', scopes: ['mcp'], exp: Math.floor(Date.now() / 1000) + 300 }
+      : null,
+    metadataUrl: 'https://example.com/.well-known/oauth-protected-resource/mcp',
+  } as never, { capture: async () => { throw new Error('Unused screenshot'); } }, {
+    create: authCreate,
+    close: (owner, id) => securedSessions.close(owner, id),
+    snapshot: (owner, id) => securedSessions.run(owner, id, context => snapshotAutomationContext(context)),
+    fill: (owner, id, selector, value) => securedSessions.run(owner, id, context => fillAutomationControl(context, selector, value)),
+    click: (owner, id, selector) => securedSessions.run(owner, id, context => clickAutomationControl(context, selector)),
+  });
+  try {
+    const request = (token: string, id: number, name: string, args: Record<string, unknown>) =>
+      authApp.inject({ method: 'POST', url: '/mcp',
+        headers: { authorization: token, accept: 'application/json, text/event-stream' },
+        payload: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } },
+      });
+    const unauthorized = await request('Bearer denied', 1, 'browser_session_create', {});
+    if (unauthorized.statusCode !== 401 || securedSessions.activeCount !== 0) {
+      throw new Error('Unauthorized MCP browser session was not denied.');
+    }
+    const createdResponse = await request('Bearer smoke-authorized', 2, 'browser_session_create', {});
+    const createdBody = createdResponse.body;
+    const createdData = createdBody.split(/\\r?\\n/).find(line => line.startsWith('data:'))?.slice(5).trim() ?? createdBody;
+    const createdResult = JSON.parse(createdData) as { result?: { isError?: boolean; content?: Array<{ type: string; text?: string }> } };
+    if (createdResponse.statusCode !== 200 || createdResult.result?.isError) throw new Error('Authenticated session creation failed.');
+    const securedId = JSON.parse(createdResult.result?.content?.find(item => item.type === 'text')?.text ?? '{}').sessionId as string;
+    if (!securedId) throw new Error('Authenticated MCP session ID missing.');
+    const context = securedSessions.get('authorized@example.test', securedId).context;
+    await context.page.setContent('<h1>Authenticated Chromium</h1><input id="entry"><button id="apply">Apply</button><output id="result"></output><script>document.getElementById("apply").onclick=()=>document.getElementById("result").textContent=document.getElementById("entry").value;</script>');
+    for (const [id, name, args] of [
+      [3, 'browser_fill', { sessionId: securedId, selector: '#entry', value: 'oauth-browser-ok' }],
+      [4, 'browser_click', { sessionId: securedId, selector: '#apply' }],
+      [5, 'browser_session_close', { sessionId: securedId }],
+    ] as const) {
+      const response = await request('Bearer smoke-authorized', id, name, args);
+      if (response.statusCode !== 200 || response.body.includes('"isError":true')) {
+        throw new Error('Authenticated MCP action failed: ' + name);
+      }
+      if (name === 'browser_click' && await context.page.locator('#result').textContent() !== 'oauth-browser-ok') {
+        throw new Error('Authenticated MCP browser action did not update DOM.');
+      }
+    }
+    if (securedSessions.activeCount !== 0) throw new Error('Authenticated session leaked.');
+  } finally {
+    await closeAuthenticatedMcp();
+    await authApp.close();
+    await securedSessions.shutdown();
+    if (oldAuthFlag === undefined) delete process.env.BROWSER_AUTOMATION_ENABLED;
+    else process.env.BROWSER_AUTOMATION_ENABLED = oldAuthFlag;
   }
 
   process.stdout.write(`container-smoke: PASS (sandbox-required Chromium, ${result.png.byteLength} byte PNG)\n`);
