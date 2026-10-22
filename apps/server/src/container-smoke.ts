@@ -14,6 +14,7 @@ function assertPng(buffer: Buffer): void {
   }
 }
 
+process.env.BROWSER_AUTOMATION_WRITE_ORIGINS = new URL(process.env.SMOKE_PUBLIC_URL ?? 'https://example.com').origin;
 const browser = await launchScreenshotBrowser();
 try {
   const result = await captureWithFreshContext(browser, {
