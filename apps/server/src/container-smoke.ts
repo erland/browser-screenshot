@@ -170,6 +170,19 @@ try {
     if ((await target.page.locator('#result').textContent()) !== 'verified-input') {
       throw new Error('Chromium form interaction did not update the page.');
     }
+    const afterInteraction = await snapshotAutomationContext(target);
+    if (!afterInteraction.includes('output: verified-input')) {
+      throw new Error('Semantic snapshot did not report the updated output.');
+    }
+    await target.page.locator('#result').evaluate(node => {
+      node.setAttribute('role', 'status');
+      node.setAttribute('aria-live', 'polite');
+    });
+    const statusSnapshot = await snapshotAutomationContext(target);
+    if (!statusSnapshot.includes('status: verified-input') ||
+        !statusSnapshot.includes('aria-live: polite')) {
+      throw new Error('Semantic snapshot did not report live status text.');
+    }
     let passwordDenied = false;
     await target.page.locator('#entry').evaluate(node => node.setAttribute('type', 'password'));
     try { await fillAutomationControl(target, '#entry', 'secret'); }
