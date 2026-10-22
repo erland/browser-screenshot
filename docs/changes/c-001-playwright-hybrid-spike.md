@@ -143,3 +143,31 @@ Open findings: selector/snapshot discoverability; click side effects and operati
 revocation; true cross-service PWA fixture acceptance; resource-controller integrated stress.
 
 **Release gate remains PARTIAL. Keep PR draft and the automation flag off.**
+
+## Acceptance checkpoint – 2026-10-22, CI #443 (commit 625578a)
+
+All four configured CI jobs passed: source, PostgreSQL identity verification,
+Marketplace package validation, and the real-Chromium production container.
+
+| Criterion | Current status | Evidence / missing proof |
+| --- | --- | --- |
+| C001-01 | NOT PURSUED | The PoC implements direct Playwright rather than embedded Microsoft MCP; formal architecture decision remains |
+| C001-02 | PASS (PoC) | Direct adapter, session operations, authenticated MCP HTTP with a test bearer validator and real container Chromium |
+| C001-03 | PARTIAL | Owner isolation; real OAuth issue/revoke tested with MCP; active session bearer rejection tested, but live deployed revocation-to-context-cleanup not proved |
+| C001-04 | PARTIAL | Real Chromium blocked redirects, private iframe/WebSocket/HTTP, proxy DNS-rebinding unit; exact HTTPS-origin allowlist for both click and fill with cross-origin regression tests; complete deployed egress evaluation outstanding |
+| C001-05 | PARTIAL | FIFO, close synchronization, periodic expiry reap, idle/absolute expiration tests; client disconnect and failure-injection evidence outstanding |
+| C001-06 | PARTIAL | Same resource controller exercised by real Chromium sessions and screenshot jobs; sustained memory/queue/failure stress metrics outstanding |
+| C001-07 | NOT VERIFIED | No actual authorized MCP client to a published PWA Preview fixture using deployed service |
+| C001-08 | PARTIAL | CI #443 green; independent acceptance script run not evidenced |
+
+Additional controls implemented since #426: snapshot emits valid unique ID/test-ID
+selectors; `browser_click` advertises `destructiveHint: true`;
+`BROWSER_AUTOMATION_WRITE_ORIGINS` requires explicit HTTPS origin permission for
+both click and fill; unconfigured writes are denied by default. These are
+defense-in-depth, **not** complete safeguards against consequential actions on
+an allowed origin.
+
+**Decision remains PARTIAL. Do not merge or enable the feature in production.**
+The next practical acceptance milestone is a controlled, deployed, OAuth-authorized
+PWA Preview test with an explicitly allowlisted disposable test origin and a
+documented cleanup/revocation check.
