@@ -100,6 +100,50 @@ describe('secure automation browser adapter', () => {
     }
   });
 
+  it('allows only HTTPS preview subdomains for the explicitly scoped wildcard', async () => {
+    const previous = process.env.BROWSER_AUTOMATION_WRITE_ORIGINS;
+    process.env.BROWSER_AUTOMATION_WRITE_ORIGINS = 'https://*.preview.apphome.one';
+    let url = 'https://alpha.preview.apphome.one/form';
+    const click = vi.fn(async () => {});
+    const fill = vi.fn(async () => {});
+    const target = { page: {
+      url: () => url,
+      locator: () => ({ count: async () => 1, click, fill,
+        evaluate: async () => 'input', getAttribute: async () => 'text' }),
+    } } as never;
+    try {
+      for (const accepted of [
+        'https://alpha.preview.apphome.one/form',
+        'https://nested.alpha.preview.apphome.one/form',
+      ]) {
+        url = accepted;
+        await clickAutomationControl(target, '#apply');
+        await fillAutomationControl(target, '#entry', 'ok');
+      }
+      for (const rejected of [
+        'https://preview.apphome.one/',
+        'https://preview.apphome.one.evil.test/',
+        'https://alpha.preview.apphome.one.evil.test/',
+        'https://notpreview.apphome.one/',
+        'https://alpha.preview.apphome.one:8443/',
+        'http://alpha.preview.apphome.one/',
+        'https://evil.example/',
+      ]) {
+        url = rejected;
+        await expect(clickAutomationControl(target, '#apply')).rejects.toThrow('WRITE_ORIGIN_NOT_ALLOWED');
+        await expect(fillAutomationControl(target, '#entry', 'bad')).rejects.toThrow('WRITE_ORIGIN_NOT_ALLOWED');
+      }
+      expect(click).toHaveBeenCalledTimes(2);
+      expect(fill).toHaveBeenCalledTimes(2);
+      process.env.BROWSER_AUTOMATION_WRITE_ORIGINS = '*';
+      url = 'https://alpha.preview.apphome.one/';
+      await expect(clickAutomationControl(target, '#apply')).rejects.toThrow('WRITE_ORIGIN_NOT_ALLOWED');
+    } finally {
+      if (previous === undefined) delete process.env.BROWSER_AUTOMATION_WRITE_ORIGINS;
+      else process.env.BROWSER_AUTOMATION_WRITE_ORIGINS = previous;
+    }
+  });
+
   it('enforces network policy on every intercepted redirect and iframe request', async () => {
     let intercept!: (route: {
       request(): { url(): string };
