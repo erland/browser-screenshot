@@ -160,7 +160,8 @@ try {
       </script></body></html>
     `);
     const before = await snapshotAutomationContext(target);
-    if (!before.includes('Automation fixture') || !before.includes('button: Apply')) {
+    if (!before.includes('Automation fixture') || !before.includes('button: Apply') ||
+        !before.includes('selector: #apply') || !before.includes('selector: #entry')) {
       throw new Error('Semantic snapshot did not include expected controls.');
     }
     await fillAutomationControl(target, '#entry', 'verified-input');
