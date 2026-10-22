@@ -275,7 +275,7 @@ try {
         throw new Error('MCP click/fill did not modify real Chromium page.');
       }
       const imageResult = await call('browser_session_screenshot', { sessionId: id });
-      const imagePart = imageResult.content?.find(part => part.type === 'image');
+      const imagePart = imageResult.content?.find(part => part.type === 'image') as { type: string; data?: string } | undefined;
       if (imageResult.isError || !imagePart?.data) {
         throw new Error('MCP session screenshot returned no image.');
       }
