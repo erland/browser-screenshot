@@ -71,6 +71,26 @@ try {
     } finally {
       await redirectPage.close();
     }
+    // Exercise embedded navigation and WebSocket attempts in real Chromium.
+    // These are negative tests: a forbidden endpoint must never respond.
+    const isolationPage = await target.context.newPage();
+    try {
+      await isolationPage.setContent('<iframe id="private-frame" src="http://127.0.0.1:8080/health"></iframe>');
+      const iframe = isolationPage.frameLocator('#private-frame');
+      const iframeBody = await iframe.locator('body').textContent({ timeout: 5_000 }).catch(() => '');
+      if (iframeBody?.includes('"status":"ok"')) {
+        throw new Error('Iframe reached a private health endpoint.');
+      }
+      const socketResult = await isolationPage.evaluate(async () => new Promise<string>(resolve => {
+        const socket = new WebSocket('ws://127.0.0.1:8080/');
+        const timer = setTimeout(() => { socket.close(); resolve('timeout'); }, 2_000);
+        socket.onopen = () => { clearTimeout(timer); socket.close(); resolve('open'); };
+        socket.onerror = () => { clearTimeout(timer); resolve('blocked'); };
+      }));
+      if (socketResult === 'open') throw new Error('WebSocket reached private loopback.');
+    } finally {
+      await isolationPage.close();
+    }
     // Exercise interaction against deterministic local markup in the *same*
     // already-authorized page; no loopback web server or external fixture.
     await target.page.setContent(`
