@@ -116,6 +116,18 @@ describe('MCP OAuth', () => {
       const result = await client.callTool({ name: 'browser_session_create', arguments: {} });
       expect(result.isError).not.toBe(true);
       expect(created).toEqual(['allowed@example.test']);
+      // Revoke authorization while the browser session still exists.
+      // Every new MCP HTTP request must revalidate the bearer and deny access.
+      store.setAllowed(false);
+      const revoked = await app.inject({
+        method: 'POST', url: '/mcp',
+        headers: { authorization: 'Bearer ' + accessToken },
+        payload: { jsonrpc: '2.0', id: 99, method: 'tools/call',
+          params: { name: 'browser_session_close', arguments: { sessionId } } },
+      });
+      expect(revoked.statusCode).toBe(401);
+      expect(closed).toEqual([]);
+      store.setAllowed(true);
       const end = await client.callTool({ name: 'browser_session_close', arguments: { sessionId } });
       expect(end.isError).not.toBe(true);
       expect(closed).toEqual(['allowed@example.test:' + sessionId]);
