@@ -72,13 +72,13 @@ export async function snapshotAutomationContext(target: SecuredAutomationContext
     const href = tag === 'a' ? (await element.getAttribute('href')) ?? '' : '';
     const id = await element.getAttribute('id');
     const testId = await element.getAttribute('data-testid');
-    const selector = id && /^[a-zA-Z][\\w-]*$/.test(id)
+    const selector = id && /^[a-zA-Z][\w-]*$/.test(id)
       ? '#' + id
       : testId && /^[a-zA-Z0-9_-]{1,80}$/.test(testId)
         ? '[data-testid="' + testId + '"]'
         : '';
     const availableSelector = selector && await page.locator(selector).count() === 1 ? selector : '';
-    lines.push('[' + index + '] ' + type + ': ' + label.replace(/\\s+/g, ' ').slice(0, 200) +
+    lines.push('[' + index + '] ' + type + ': ' + label.replace(/\s+/g, ' ').slice(0, 200) +
       (availableSelector ? ' | selector: ' + availableSelector : '') +
       (href ? ' -> ' + href.slice(0, 300) : ''));
     if (lines.join('\n').length > 12_000) break;
