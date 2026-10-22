@@ -55,4 +55,24 @@ describe('secure proxy', () => {
       await proxy.close();
     }
   });
+  it('blocks DNS rebinding from public to private address for HTTP and CONNECT', async () => {
+    let lookups = 0;
+    const proxy = await startSecureProxy(async hostname => {
+      expect(hostname).toBe('rebinding.example.test');
+      lookups++;
+      return lookups === 1 ? ['1.1.1.1'] : ['127.0.0.1'];
+    });
+    try {
+      // Only the first resolution is public. The proxy must revalidate each
+      // individual request and never reuse a previously trusted DNS answer.
+      // Use an invalid port to fail the first outbound attempt immediately.
+      await expect(proxyHttpStatus(proxy.url, 'http://rebinding.example.test:0/')).resolves.toBe(502);
+      await expect(proxyHttpStatus(proxy.url, 'http://rebinding.example.test/private')).resolves.toBe(403);
+      await expect(proxyConnectStatus(proxy.url, 'rebinding.example.test:443')).resolves.toContain('403 Forbidden');
+      expect(lookups).toBe(3);
+    } finally {
+      await proxy.close();
+    }
+  });
+
 });
