@@ -65,4 +65,42 @@ describe('automation session manager (private PoC foundation)', () => {
     await expect(manager.close('a', session.id)).rejects.toThrow('close failed');
     expect(manager.activeCount).toBe(1);
   });
+  it('serializes concurrent actions and waits for them before closing', async () => {
+    const { manager, close } = create();
+    const session = await manager.create('a');
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const events: string[] = [];
+    const first = manager.run('a', session.id, async () => {
+      events.push('first-start');
+      await gate;
+      events.push('first-end');
+    });
+    const second = manager.run('a', session.id, async () => {
+      events.push('second');
+    });
+    const closing = manager.close('a', session.id).then(() => { events.push('closed'); });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(events).toEqual(['first-start']);
+    expect(close).not.toHaveBeenCalled();
+    await expect(manager.run('a', session.id, async () => {})).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    release();
+    await Promise.all([first, second, closing]);
+    expect(events).toEqual(['first-start', 'first-end', 'second', 'closed']);
+    expect(close).toHaveBeenCalledOnce();
+    expect(manager.activeCount).toBe(0);
+  });
+
+  it('continues the FIFO after a failed action without leaking an active slot', async () => {
+    const { manager } = create();
+    const session = await manager.create('a');
+    const failed = manager.run('a', session.id, async () => { throw Error('action failed'); });
+    const succeeded = manager.run('a', session.id, async () => 'ok');
+    await expect(failed).rejects.toThrow('action failed');
+    await expect(succeeded).resolves.toBe('ok');
+    await manager.shutdown();
+    expect(manager.activeCount).toBe(0);
+  });
+
 });
