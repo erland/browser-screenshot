@@ -121,3 +121,25 @@ sandboxed Chromium, but did not exercise OAuth on the same transport.
 
 Do not call C-001 release-ready or switch `BROWSER_AUTOMATION_ENABLED` on
 until blocking issues are resolved, verified and documented.
+
+## Acceptance checkpoint – 2026-10-22, CI #426 (commit e1f16d8)
+
+CI #426 passed all configured jobs, including production container smoke.
+This supersedes the *test status*, not the historical security findings above.
+
+| Criterion | Updated assessment | Remaining evidence |
+| --- | --- | --- |
+| C001-01 | Not applicable: direct Playwright chosen | Record formal driver decision |
+| C001-02 | PASS (PoC) | Public contract implemented and tested |
+| C001-03 | PARTIAL | Revocation while session is live, end-to-end |
+| C001-04 | PARTIAL, stronger coverage | Real Chromium redirect, iframe and live internal-server WebSocket/HTTP denial plus proxy DNS-rebinding unit tests pass; exhaustive egress and DNS-rebinding end-to-end still outstanding |
+| C001-05 | PARTIAL | Explicit close, lifecycle and concurrency tests pass; disconnect, failures and time-based cleanup still need end-to-end evidence |
+| C001-06 | PARTIAL | Deterministic queue/lease tests plus two automation sessions and three concurrent Chromium screenshots pass; mixed workloads through *the same resource controller* and sustained stress/memory measurement remain |
+| C001-07 | NOT VERIFIED | OAuth-authorized end-to-end against published PWA Preview fixture |
+| C001-08 | PARTIAL | CI source/container suites pass; `scripts/verify-acceptance.sh` not independently evidenced |
+
+Closed finding: per-session FIFO action serialization and close synchronization implemented and covered by CI.
+Open findings: selector/snapshot discoverability; click side effects and operation scoping;
+revocation; true cross-service PWA fixture acceptance; resource-controller integrated stress.
+
+**Release gate remains PARTIAL. Keep PR draft and the automation flag off.**
