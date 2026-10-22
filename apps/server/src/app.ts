@@ -12,7 +12,7 @@ import { registerMcpOAuthRoutes } from './oauth.js';
 import { registerMcpRoute } from './mcp.js';
 import { automationEnabled } from './automation-sessions.js';
 import { createLeasedAutomationSessionManager } from './automation-runtime.js';
-import { navigateAutomationContext, snapshotAutomationContext, clickAutomationControl, fillAutomationControl } from './automation-browser.js';
+import { navigateAutomationContext, snapshotAutomationContext, clickAutomationControl, fillAutomationControl, screenshotAutomationContext } from './automation-browser.js';
 import { ScreenshotResourceController } from './resource-controls.js';
 import {
   DefaultScreenshotCapability,
@@ -91,6 +91,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       close: (owner, id) => automation.close(owner, id),
       navigate: (owner, id, url) => automation.run(owner, id, context => navigateAutomationContext(context, url)),
       snapshot: (owner, id) => automation.run(owner, id, context => snapshotAutomationContext(context)),
+      screenshot: (owner, id, fullPage) => automation.run(owner, id, context => screenshotAutomationContext(context, fullPage)),
       click: (owner, id, selector) => automation.run(owner, id, context => clickAutomationControl(context, selector)),
       fill: (owner, id, selector, value) => automation.run(owner, id, context => fillAutomationControl(context, selector, value)),
     } : undefined);
