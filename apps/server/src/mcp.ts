@@ -173,9 +173,9 @@ export function createBrowserScreenshotMcpHandler(
       }
       if (automation.click) {
         server.registerTool('browser_click', {
-          description: 'Click a uniquely identified control in a caller-owned browser session. Only ID and data-testid selectors are supported.',
+          description: 'Click a uniquely identified control on an external website. Clicking can submit forms, change data, or trigger destructive actions; obtain user authorization for consequential actions. Only ID and data-testid selectors are supported.',
           inputSchema: z.object({ sessionId: z.string().uuid(), selector: z.string().min(2).max(200) }),
-          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+          annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
         }, async ({ sessionId, selector }) => {
           const owner = actorKeyProvider();
           if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
