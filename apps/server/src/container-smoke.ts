@@ -257,7 +257,7 @@ try {
       if (oldFlag === undefined) delete process.env.BROWSER_AUTOMATION_ENABLED;
       else process.env.BROWSER_AUTOMATION_ENABLED = oldFlag;
     }
-    if (sessions.activeCount !== 0) throw new Error('Automation context leaked.');
+    if (remainingAfterClose() !== 0) throw new Error('Automation context leaked.');
   } finally {
     await sessions.shutdown();
   }
