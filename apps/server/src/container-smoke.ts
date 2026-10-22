@@ -53,6 +53,29 @@ try {
     if (bodyCount !== 1) throw new Error('Automation page has no HTML body.');
     const automationPng = await target.page.screenshot({ type: 'png' });
     assertPng(automationPng);
+    // Mixed real-Chromium workload: two isolated automation contexts and
+    // three screenshot contexts coexist on the same sandboxed browser.
+    const extra = await sessions.create('second-smoke-actor');
+    try {
+      const extraPage = sessions.get('second-smoke-actor', extra.id).context.page;
+      await extraPage.setContent('<!doctype html><title>Second session</title><h1>Independent context</h1>');
+      const screenshots = await Promise.all(Array.from({ length: 3 }, () =>
+        captureWithFreshContext(browser, {
+          url: process.env.SMOKE_PUBLIC_URL ?? 'https://example.com',
+          width: 480, height: 320, timeoutMs: 20_000,
+        }),
+      ));
+      for (const screenshot of screenshots) assertPng(screenshot.png);
+      if (await extraPage.title() !== 'Second session') {
+        throw new Error('Second automation session changed during screenshot burst.');
+      }
+      if (sessions.activeCount !== 2) throw new Error('Automation capacity was not retained.');
+      if (await target.page.locator('body').count() !== 1) {
+        throw new Error('Original automation context was lost during screenshots.');
+      }
+    } finally {
+      await sessions.close('second-smoke-actor', extra.id);
+    }
     // Exercise Chromium's redirect handling: a public HTTPS URL returning a
     // redirect to loopback must not reach the private target.
     const redirectPage = await target.context.newPage();
