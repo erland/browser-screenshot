@@ -331,7 +331,7 @@ try {
     }
     const createdResponse = await request('Bearer smoke-authorized', 2, 'browser_session_create', {});
     const createdBody = createdResponse.body;
-    const createdData = createdBody.split(/\\r?\\n/).find(line => line.startsWith('data:'))?.slice(5).trim() ?? createdBody;
+    const createdData = createdBody.split(/\r?\n/).find(line => line.startsWith('data:'))?.slice(5).trim() ?? createdBody;
     const createdResult = JSON.parse(createdData) as { result?: { isError?: boolean; content?: Array<{ type: string; text?: string }> } };
     if (createdResponse.statusCode !== 200 || createdResult.result?.isError) throw new Error('Authenticated session creation failed.');
     const securedId = JSON.parse(createdResult.result?.content?.find(item => item.type === 'text')?.text ?? '{}').sessionId as string;
