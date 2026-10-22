@@ -78,3 +78,46 @@ General-purpose scripting, arbitrary expression execution, file transfer, unrest
 ## Planned follow-up
 
 C-002 implements the chosen engine/session tools and unit/integration tests. C-003 adds declarative `browser_test_run`, assertions, console/network diagnostics and PWA Preview test reports. Update governing architecture and functional specification as part of the implementation work; the present document is a proposed change, not an assertion of implemented capability.
+
+## Security review – 2026-10-22 (commit e3aad28)
+
+Decision: **PARTIAL / keep draft, feature flag OFF in production**.
+
+CI #408 passed all four jobs: Verify source, Verify PostgreSQL identities,
+Validate Marketplace plugin package and Verify production container.
+The production-container smoke exercised MCP JSON-RPC tools against real,
+sandboxed Chromium, but did not exercise OAuth on the same transport.
+
+| Criterion | Evidence | Assessment |
+| --- | --- | --- |
+| C001-01 Embedded Microsoft MCP | Not integrated or tested; implementation uses direct Playwright | NOT APPLICABLE to selected direct adapter |
+| C001-02 Direct Playwright | Browser session, navigate, snapshot, fill, click, close and production container smoke | PASS (PoC) |
+| C001-03 Ownership | Session owner checked in manager; MCP actor from OAuth; cross-owner and OAuth tests separate | PARTIAL (revoke mid-session E2E unverified) |
+| C001-04 Network boundary | Validated initial navigations, route interception and proxy, loopback-denial smoke | PARTIAL (redirect/frame/WebSocket/bypass matrix not exhaustively executed) |
+| C001-05 Cleanup | Explicit close, idle/absolute checks, shutdown tests | PARTIAL (disconnect/error and failure injection incomplete) |
+| C001-06 Resource budget | Shared leased screenshot resource controller and caps implemented | PARTIAL (mixed concurrent load/queue measurements missing) |
+| C001-07 Preview OAuth E2E | OAuth HTTP and real Chromium MCP tested separately | NOT VERIFIED on published PWA Preview fixture |
+| C001-08 Regression | GitHub Actions CI #408 successful | PASS for configured checks; separate acceptance script not independently evidenced |
+
+### Review findings requiring resolution
+
+1. **HIGH: Concurrent actions in a single session are not serialized.**
+   `AutomationSessionManager.get()` returns a mutable page; navigation, click,
+   fill and snapshot execute without a per-session action lock. This violates the
+   original session-execution requirement and can lead to cross-action races.
+   Introduce a per-session FIFO or mutex, including close/shutdown coordination.
+2. **HIGH: Complete URL/network-bypass test matrix is missing.**
+   The production proxy and route handler are reused, but no current exhaustive
+   evidence for WebSockets, redirects, iframes, DNS changes and browser egress.
+3. **MEDIUM: Snapshot and control selectors are not aligned.**
+   Snapshot enumerates indices while click/fill accept only `#id` and
+   `[data-testid="..."]`. Pages without these attributes cannot be
+   interacted with reliably. Choose a stable locator scheme.
+4. **MEDIUM: Side effects on arbitrary external sites are possible.**
+   `browser_click` can activate destructive actions on external pages.
+   Add explicit operation policy, request-side scoping and review of confirmation.
+5. **MEDIUM: No real OAuth-to-published-PWA end-to-end acceptance run.**
+   Existing independent OAuth and Chromium tests are not a substitute.
+
+Do not call C-001 release-ready or switch `BROWSER_AUTOMATION_ENABLED` on
+until blocking issues are resolved, verified and documented.
