@@ -52,6 +52,7 @@ export function automationEnabled(env: NodeJS.ProcessEnv = process.env): boolean
 export class AutomationSessionManager<T extends AutomationContext> {
   private readonly sessions = new Map<string, AutomationSession<T>>();
   private readonly closing = new Map<string, Promise<void>>();
+  private readonly actionTails = new Map<string, Promise<void>>();
   private readonly pendingOwners = new Map<string, number>();
   private pendingGlobal = 0;
   private stopped = false;
@@ -113,6 +114,20 @@ export class AutomationSessionManager<T extends AutomationContext> {
     return session;
   }
 
+  /** Reserve a FIFO slot synchronously before awaiting anything.
+   * Close waits for already accepted work, but rejects new work immediately. */
+  run<R>(owner: string, id: string, action: (context: T) => Promise<R>): Promise<R> {
+    const session = this.get(owner, id);
+    const previous = this.actionTails.get(id) ?? Promise.resolve();
+    const task = previous.then(() => action(session.context));
+    const tail = task.then(() => undefined, () => undefined);
+    this.actionTails.set(id, tail);
+    void tail.then(() => {
+      if (this.actionTails.get(id) === tail) this.actionTails.delete(id);
+    });
+    return task;
+  }
+
   async close(owner: string, id: string): Promise<void> {
     const session = this.sessions.get(id);
     if (!session || session.owner !== owner) throw new AutomationSessionError('NOT_FOUND');
@@ -127,8 +142,10 @@ export class AutomationSessionManager<T extends AutomationContext> {
   private async closeInternal(s: AutomationSession<T>): Promise<void> {
     const existing = this.closing.get(s.id);
     if (existing) return existing;
-    const task = s.context.close().then(() => {
+    const previous = this.actionTails.get(s.id) ?? Promise.resolve();
+    const task = previous.then(() => s.context.close()).then(() => {
       this.sessions.delete(s.id);
+      this.actionTails.delete(s.id);
     }).finally(() => {
       this.closing.delete(s.id);
     });
