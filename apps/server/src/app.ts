@@ -52,8 +52,16 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const automation = sharedResources
     ? createLeasedAutomationSessionManager(sharedResources)
     : undefined;
+  // Reap idle and absolute-expired contexts even without incoming MCP calls.
+  // A detached client must not retain a Chromium lease indefinitely.
+  const reapTimer = automation ? setInterval(() => {
+    void automation.reap().catch(error => app.log.warn({ err: error }, 'Automation cleanup failed'));
+  }, 30_000) : undefined;
+  reapTimer?.unref();
+
   // Close interactive contexts before their underlying Chromium/browser owner.
   app.addHook('onClose', async () => {
+    if (reapTimer) clearInterval(reapTimer);
     try {
       await automation?.shutdown();
     } finally {
