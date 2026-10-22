@@ -100,8 +100,16 @@ function assertWriteOrigin(target: SecuredAutomationContext): void {
   if (current.protocol !== 'https:' ||
       !configured.some(value => {
         try {
+          // Explicitly scoped wildcard: never match the apex or lookalike hosts.
+          // No general "*" wildcard or arbitrary domain suffixes are accepted.
+          if (value === 'https://*.preview.apphome.one') {
+            return current.port === '' &&
+              current.hostname.endsWith('.preview.apphome.one') &&
+              current.hostname !== 'preview.apphome.one';
+          }
           const allowed = new URL(value);
           return allowed.protocol === 'https:' && allowed.pathname === '/' &&
+            !allowed.username && !allowed.password &&
             !allowed.search && !allowed.hash && allowed.origin === current.origin;
         } catch { return false; }
       })) {
