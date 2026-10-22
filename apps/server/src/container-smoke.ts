@@ -54,20 +54,23 @@ try {
     assertPng(automationPng);
     // Exercise Chromium's redirect handling: a public HTTPS URL returning a
     // redirect to loopback must not reach the private target.
-    await target.page.route('https://example.com/c001-redirect', async route => {
-      await route.fulfill({ status: 302, headers: { location: 'http://127.0.0.1:8080/health' }, body: '' });
-    });
-    let redirectDenied = false;
+    const redirectPage = await target.context.newPage();
     try {
-      await navigateAutomationContext(target, 'https://example.com/c001-redirect');
-    } catch {
-      redirectDenied = true;
+      await redirectPage.route('https://example.com/c001-redirect', async route => {
+        await route.fulfill({ status: 302, headers: { location: 'http://127.0.0.1:8080/health' }, body: '' });
+      });
+      let redirectDenied = false;
+      try {
+        await navigateAutomationContext({ ...target, page: redirectPage }, 'https://example.com/c001-redirect');
+      } catch {
+        redirectDenied = true;
+      }
+      if (!redirectDenied || redirectPage.url().startsWith('http://127.0.0.1:8080/')) {
+        throw new Error('Automation did not block redirect to loopback.');
+      }
+    } finally {
+      await redirectPage.close();
     }
-    if (!redirectDenied || target.page.url().startsWith('http://127.0.0.1:8080/')) {
-      throw new Error('Automation did not block redirect to loopback.');
-    }
-    await target.page.unroute('https://example.com/c001-redirect');
-
     // Exercise interaction against deterministic local markup in the *same*
     // already-authorized page; no loopback web server or external fixture.
     await target.page.setContent(`
