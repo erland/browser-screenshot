@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SecuredAutomationContext } from './automation-browser.js';
+import { validatePublicUrl } from './network-policy.js';
+
+vi.mock('./network-policy.js', () => ({ validatePublicUrl: vi.fn(async () => ({})) }));
 import { inspectPwaCaches, inspectPwaStatus, reloadPwaPage, setPwaOffline } from './pwa-diagnostics.js';
 
 function fixture(url = 'https://example.org/app?token=secret') {
@@ -24,6 +27,39 @@ describe('PWA diagnostics', () => {
     reload.mockRejectedValueOnce(new Error('net::ERR_INTERNET_DISCONNECTED'));
     await expect(reloadPwaPage(target)).resolves.toEqual({ url: 'https://example.org/app', loaded: false });
     await expect(reloadPwaPage(target)).resolves.toEqual({ url: 'https://example.org/app', loaded: true });
+  });
+
+  it('restores online and reloads the original public URL after Chromium replaces a failed offline page', async () => {
+    let currentUrl = 'https://example.org/app?token=secret';
+    let online = true;
+    const setOffline = vi.fn(async (offline: boolean) => { online = !offline; });
+    const reload = vi.fn(async () => {
+      if (!online) {
+        currentUrl = 'chrome-error://chromewebdata/';
+        throw new Error('net::ERR_INTERNET_DISCONNECTED');
+      }
+    });
+    const goto = vi.fn(async (url: string) => { currentUrl = url; });
+    const target = {
+      context: { setOffline },
+      page: { url: () => currentUrl, reload, goto },
+    } as unknown as SecuredAutomationContext;
+    await expect(setPwaOffline(target, true)).resolves.toEqual({ offline: true });
+    await expect(reloadPwaPage(target)).resolves.toEqual({ url: 'https://example.org/app', loaded: false });
+    expect(currentUrl).toBe('chrome-error://chromewebdata/');
+    await expect(setPwaOffline(target, false)).resolves.toEqual({ offline: false });
+    // The last trusted destination must be validated before navigating.
+    await expect(reloadPwaPage(target)).resolves.toEqual({ url: 'https://example.org/app', loaded: true });
+    expect(validatePublicUrl).toHaveBeenCalledWith('https://example.org/app?token=secret');
+    expect(goto).toHaveBeenCalledWith(
+      'https://example.org/app?token=secret',
+      { waitUntil: 'domcontentloaded', timeout: 10_000 },
+    );
+  });
+
+  it('refuses to recover an error page without a previously trusted destination', async () => {
+    const { target } = fixture('chrome-error://chromewebdata/');
+    await expect(reloadPwaPage(target)).rejects.toThrow('PWA_RECOVERY_TARGET_UNAVAILABLE');
   });
 
   it('rejects non-HTTPS pages without touching network state or storage', async () => {
