@@ -13,7 +13,7 @@ import type { ScreenshotCapability } from './screenshot-capability.js';
 import { SCREENSHOT_WIDGET_HTML, SCREENSHOT_WIDGET_URI } from './screenshot-widget.js';
 
 const BROWSER_SCREENSHOT_DESCRIPTION =
-  'Captures PNG screenshots of public HTTP(S) web pages with desktop, tablet, mobile, or custom viewports.';
+  'Capture screenshots of public HTTP(S) pages, or use optional authenticated browser sessions for interaction tests and PWA offline diagnostics. Typical workflow: create session, navigate, inspect snapshot/status/cache, test offline/reload/online recovery, always close. Tools are available independently of whether the MCP host supports Skills Extension.';
 const BROWSER_SCREENSHOT_WEBSITE = 'https://browser-screenshot.apphome.one/about';
 const BROWSER_SCREENSHOT_ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABJklEQVR4nO2bwQ3CMBAECeLLD0ERlEIN0AD10AA1hFIogirghRShQMzZZix25x3h0eicOJHo1vv+PhNmTgvQOAAtQOMAtACNA9ACNA5AC9A4AC1A4wC0AM0i9cLraVfTowrb42XyGvkJcABagMYBaAEaB6AFaJLPAatlTQ0O+QmQD5C8BcbYHMaPmrdzvWNz6TXDE/BOhCLq4y1Q4kdqjvzUWrmTKD8BDkAL0ITvAb/c95/I9ZCfAAegBWgcgBagCT8Fhicw8omQ6yE/AQ5AC9AUeRt8fSMjPohEkZ+AcIBW3gWeRH2ytgARofSayRPQ2jfAKVJ95e8BXeT/Aq3t/yHfTmoowD8hvwUcgBagcQBagMYBaAEaB6AFaByAFqBxAFqARj7AA03iMc36yblqAAAAAElFTkSuQmCC';
 
@@ -83,7 +83,7 @@ export function createBrowserScreenshotMcpHandler(
     server.registerTool(
       'screenshot_create',
       {
-        description: 'Capture a PNG screenshot of a public HTTP(S) URL using a preset or custom viewport.',
+        description: 'Single-shot screenshot of a public HTTP(S) URL with PNG metadata. Use requested viewport; default desktop, and capture full-page only when helpful. For interactive or PWA tests use an owner-bound browser session instead. Does not prove the page functions correctly.',
         inputSchema: SCREENSHOT_REQUEST_SCHEMA,
         annotations: {
           readOnlyHint: true,
@@ -133,7 +133,7 @@ export function createBrowserScreenshotMcpHandler(
     // application-owned session service. Missing configuration exposes no tools.
     if (automation && automationEnabled()) {
       server.registerTool('browser_session_create', {
-        description: 'Create an isolated browser session for interactive testing.',
+        description: 'Start a caller-owned isolated browser session for authorized public-site interaction or PWA testing. Use returned sessionId for subsequent navigation/snapshot/status/cache/offline/reload, and ALWAYS call browser_session_close (even on failure). No localhost/private targets.',
         inputSchema: z.object({}),
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       }, async () => {
@@ -148,7 +148,7 @@ export function createBrowserScreenshotMcpHandler(
       });
       if (automation.navigate) {
         server.registerTool('browser_navigate', {
-          description: 'Navigate an existing, caller-owned browser session to a public HTTP(S) URL.',
+          description: 'Navigate an existing caller-owned session to the exact public HTTP(S) target. For read-only flow tests call browser_snapshot after navigation; for PWA checks follow with browser_pwa_status and browser_cache_inspect. Private network targets are blocked.',
           inputSchema: z.object({ sessionId: z.string().uuid(), url: z.string().url().max(2048) }),
           annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
         }, async ({ sessionId, url }) => {
@@ -164,7 +164,7 @@ export function createBrowserScreenshotMcpHandler(
       }
       if (automation.snapshot) {
         server.registerTool('browser_snapshot', {
-          description: 'Read a bounded semantic overview of a caller-owned browser page.',
+          description: 'Read bounded page title, links and controls for test assertions. Inspect before and after any permitted interaction; never invent selectors or infer hidden functionality. For a PWA offline test, compare online and offline snapshots.',
           inputSchema: z.object({ sessionId: z.string().uuid() }),
           annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         }, async ({ sessionId }) => {
@@ -180,7 +180,7 @@ export function createBrowserScreenshotMcpHandler(
       }
       if (automation.screenshot) {
         server.registerTool('browser_session_screenshot', {
-          description: 'Capture a PNG of the current page in an existing caller-owned browser session, preserving prior interactions.',
+          description: 'Capture current session state as PNG evidence after navigation or an authorized interaction; preserves session, service workers and cache. Screenshots alone do not prove behavior.',
           inputSchema: z.object({ sessionId: z.string().uuid(), fullPage: z.boolean().optional().default(false) }),
           annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         }, async ({ sessionId, fullPage }) => {
@@ -199,7 +199,7 @@ export function createBrowserScreenshotMcpHandler(
       }
       if (automation.click) {
         server.registerTool('browser_click', {
-          description: 'Click a uniquely identified control on an external website. Clicking can submit forms, change data, or trigger destructive actions; obtain user authorization for consequential actions. Only ID and data-testid selectors are supported.',
+          description: 'Click a unique #id or [data-testid] control discovered via browser_snapshot. May submit/change/delete website data: require explicit user authorization for consequential actions; only allowed test origins are supported. Re-read browser_snapshot afterwards to verify.',
           inputSchema: z.object({ sessionId: z.string().uuid(), selector: z.string().min(2).max(200) }),
           annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
         }, async ({ sessionId, selector }) => {
@@ -215,7 +215,7 @@ export function createBrowserScreenshotMcpHandler(
       }
       if (automation.fill) {
         server.registerTool('browser_fill', {
-          description: 'Fill a single text control in a caller-owned browser session. Password and file inputs are not supported.',
+          description: 'Fill a single text control selected by supported unique #id or [data-testid] from browser_snapshot on an authorized test origin. Password and file inputs are unsupported. Never insert secrets; verify outcome with browser_snapshot.',
           inputSchema: z.object({ sessionId: z.string().uuid(), selector: z.string().min(2).max(200), value: z.string().max(10000) }),
           annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
         }, async ({ sessionId, selector, value }) => {
@@ -231,7 +231,7 @@ export function createBrowserScreenshotMcpHandler(
       }
       if (automation.setOffline) {
         server.registerTool('browser_set_offline', {
-          description: 'Emulate network offline/online in the caller-owned PWA test session.',
+          description: 'PWA workflow: start online on public HTTPS, inspect browser_pwa_status and browser_cache_inspect; set offline:true, then browser_reload and browser_snapshot. ALWAYS restore offline:false (even when offline reload fails), reload online, and close the session. Network emulation alone is not proof of offline PWA functionality.',
           inputSchema: z.object({ sessionId: z.string().uuid(), offline: z.boolean() }),
           annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         }, async ({ sessionId, offline }) => {
@@ -245,7 +245,7 @@ export function createBrowserScreenshotMcpHandler(
       }
       if (automation.reload) {
         server.registerTool('browser_reload', {
-          description: 'Reload the existing PWA test page without discarding service workers or caches.',
+          description: 'Reload the existing PWA session, preserving service workers and caches. loaded:false after an offline reload is a valid test outcome; ALWAYS restore browser_set_offline(false) and retry online before closing. Verify app content with browser_snapshot, not loaded alone.',
           inputSchema: z.object({ sessionId: z.string().uuid() }),
           annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
         }, async ({ sessionId }) => {
@@ -259,7 +259,7 @@ export function createBrowserScreenshotMcpHandler(
       }
       if (automation.pwaStatus) {
         server.registerTool('browser_pwa_status', {
-          description: 'Read service worker registration and controller status for the current HTTPS page without exposing storage values.',
+          description: 'Inspect PWA service worker registration/controller state on the current public HTTPS page (no storage values). For offline assessment, inspect once online before browser_set_offline(true) and once after reload; a registered worker alone does not prove offline support.',
           inputSchema: z.object({ sessionId: z.string().uuid() }),
           annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         }, async ({ sessionId }) => {
@@ -273,7 +273,7 @@ export function createBrowserScreenshotMcpHandler(
       }
       if (automation.cacheInspect) {
         server.registerTool('browser_cache_inspect', {
-          description: 'List bounded cache names and sanitized resource paths for the current PWA origin. No cached response bodies or headers are returned.',
+          description: 'Read bounded same-origin Cache Storage names and sanitized resource paths, not response bodies or headers. Inspect before and after offline reload. Cache presence alone does not prove a PWA works offline.',
           inputSchema: z.object({ sessionId: z.string().uuid() }),
           annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         }, async ({ sessionId }) => {
@@ -286,7 +286,7 @@ export function createBrowserScreenshotMcpHandler(
         });
       }
       server.registerTool('browser_session_close', {
-        description: 'Close a browser session owned by the authenticated caller.',
+        description: 'Always close an authenticated caller-owned browser session at the end of a test, including when navigation/reload/offline checks fail. If offline mode was enabled, best-effort restore browser_set_offline(false) first.',
         inputSchema: z.object({ sessionId: z.string().uuid() }),
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       }, async ({ sessionId }) => {
