@@ -19,6 +19,27 @@ docker build --pull -t "$IMAGE" .
 
 docker run --rm --init --shm-size=1g   --security-opt "seccomp=$SECCOMP_PROFILE"   "$IMAGE" node apps/server/dist/container-smoke.js
 
+# Real Chromium test: install SW/cache on a deterministic isolated HTTPS fixture,
+# reload offline, and recover online. This does not claim to prove egress isolation.
+docker run --rm --init --shm-size=1g \
+  --security-opt "seccomp=$SECCOMP_PROFILE" \
+  "$IMAGE" node apps/server/dist/pwa-offline-smoke.js
+
+# Re-run existing sandbox/SSRF checks while automation contexts allow service
+# workers. The per-context interceptor can be bypassed by SW-originated fetches:
+# the mandatory hardened browser proxy must remain the security boundary.
+docker run --rm --init --shm-size=1g \
+  --security-opt "seccomp=$SECCOMP_PROFILE" \
+  -e BROWSER_PWA_TEST_ENABLED=true \
+  "$IMAGE" node apps/server/dist/container-smoke.js
+
+# An actual service worker attempts a private-network fetch. The private
+# fixture's inbound counter must not increase; failure blocks the release.
+docker run --rm --init --shm-size=1g \
+  --security-opt "seccomp=$SECCOMP_PROFILE" \
+  -e BROWSER_PWA_TEST_ENABLED=true \
+  "$IMAGE" node apps/server/dist/pwa-worker-egress-smoke.js
+
 docker compose -p "$PROJECT" up -d --build
 for _ in $(seq 1 30); do
   if curl --fail --silent http://127.0.0.1:8080/ready >/dev/null; then

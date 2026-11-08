@@ -149,4 +149,68 @@ describe('automation MCP contract via real MCP transport', () => {
     } finally { await x.close(); }
   });
 
+  it('exposes PWA operations through the MCP transport and protects every call by session owner', async () => {
+    process.env.BROWSER_AUTOMATION_ENABLED = 'true';
+    const sessionId = '0a35c020-6bf0-439c-8c3d-09c9c609969a';
+    let currentOwner: string | undefined = 'owner-a';
+    const assertOwner = (owner: string, id: string) => {
+      if (owner !== 'owner-a' || id !== sessionId) throw new Error('NOT_FOUND');
+    };
+    const setOffline = vi.fn(async (owner: string, id: string, offline: boolean) => {
+      assertOwner(owner, id);
+      return { offline };
+    });
+    const reload = vi.fn(async (owner: string, id: string) => {
+      assertOwner(owner, id);
+      return { url: 'https://example.org/', loaded: true };
+    });
+    const pwaStatus = vi.fn(async (owner: string, id: string) => {
+      assertOwner(owner, id);
+      return { supported: true, controlled: true, registrations: [] };
+    });
+    const cacheInspect = vi.fn(async (owner: string, id: string) => {
+      assertOwner(owner, id);
+      return { supported: true, caches: [], truncated: false };
+    });
+    const x = await connect(() => currentOwner, {
+      create: vi.fn(), close: vi.fn(), setOffline, reload, pwaStatus, cacheInspect,
+    });
+    try {
+      const tools = (await x.client.listTools()).tools.map(tool => tool.name);
+      expect(tools).toEqual(expect.arrayContaining([
+        'browser_set_offline', 'browser_reload', 'browser_pwa_status', 'browser_cache_inspect',
+      ]));
+      for (const [name, args] of [
+        ['browser_set_offline', { sessionId, offline: true }],
+        ['browser_reload', { sessionId }],
+        ['browser_pwa_status', { sessionId }],
+        ['browser_cache_inspect', { sessionId }],
+      ] as const) {
+        const result = await x.client.callTool({ name, arguments: args });
+        expect(result.isError).not.toBe(true);
+      }
+      expect(setOffline).toHaveBeenCalledWith('owner-a', sessionId, true);
+      expect(reload).toHaveBeenCalledWith('owner-a', sessionId);
+      expect(pwaStatus).toHaveBeenCalledWith('owner-a', sessionId);
+      expect(cacheInspect).toHaveBeenCalledWith('owner-a', sessionId);
+      currentOwner = 'owner-b';
+      for (const [name, args] of [
+        ['browser_set_offline', { sessionId, offline: false }],
+        ['browser_reload', { sessionId }],
+        ['browser_pwa_status', { sessionId }],
+        ['browser_cache_inspect', { sessionId }],
+      ] as const) {
+        const result = await x.client.callTool({ name, arguments: args });
+        expect(result.isError).toBe(true);
+      }
+      currentOwner = undefined;
+      const unauthorized = await x.client.callTool({
+        name: 'browser_pwa_status', arguments: { sessionId },
+      });
+      expect(unauthorized.isError).toBe(true);
+    } finally {
+      await x.close();
+    }
+  });
+
 });

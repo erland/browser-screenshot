@@ -34,7 +34,9 @@ export async function createSecuredAutomationContext(
   const context = await screenshotBrowser.browser.newContext({
     viewport,
     acceptDownloads: false,
-    serviceWorkers: 'block',
+    // Service workers bypass Playwright route interception. The hardened Chromium
+    // proxy remains mandatory; opt in only for controlled PWA testing.
+    serviceWorkers: process.env.BROWSER_PWA_TEST_ENABLED === 'true' ? 'allow' : 'block',
   });
   try {
     await context.route('**/*', enforceAutomationRequest);
