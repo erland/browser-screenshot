@@ -141,12 +141,17 @@ try {
         worker.postMessage({ target }, [channel.port2]);
       });
     }, privateUrl);
-    if (result !== 'blocked' || privateHits !== baseline) {
-      throw new Error('Service worker reached private destination: ' +
-        JSON.stringify({ result, privateHits, baseline }));
+    // A no-cors fetch can RESOLVE with an opaque 403 proxy response.
+    // This says nothing about access to the private host. The decisive test
+    // is an unchanged private inbound counter AFTER the worker's fetch settles.
+    // Also require a forwarded request, proving the probe was exercised.
+    if (privateHits !== baseline || forwardedRequests < 1 ||
+        !['blocked', 'resolved'].includes(result)) {
+      throw new Error('Service worker private-egress boundary failed: ' +
+        JSON.stringify({ result, privateHits, baseline, forwardedRequests }));
     }
-    console.log('PWA_SW_EGRESS: PASS (worker fetch blocked, private inbound unchanged, proxy-forwarded=' +
-      forwardedRequests + ')');
+    console.log('PWA_SW_EGRESS: PASS (private inbound unchanged, worker-result=' +
+      result + ', proxy-forwarded=' + forwardedRequests + ')');
   } finally {
     await context.close();
   }
