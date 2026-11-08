@@ -3,9 +3,9 @@ import type { SecuredAutomationContext } from './automation-browser.js';
 import { inspectPwaCaches, inspectPwaStatus, reloadPwaPage, setPwaOffline } from './pwa-diagnostics.js';
 
 function fixture(url = 'https://example.org/app?token=secret') {
-  const setOffline = vi.fn(async (_offline: boolean) => {});
-  const reload = vi.fn(async (_options: unknown) => {});
-  const evaluate = vi.fn(async (_code: unknown) => ({ supported: true, controlled: false, registrations: [] }));
+  const setOffline = vi.fn(async () => {});
+  const reload = vi.fn(async () => {});
+  const evaluate = vi.fn(async () => ({ supported: true, controlled: false, registrations: [] }));
   const context = { setOffline };
   const page = { url: () => url, reload, evaluate };
   return { target: { context, page } as unknown as SecuredAutomationContext, setOffline, reload, evaluate };
