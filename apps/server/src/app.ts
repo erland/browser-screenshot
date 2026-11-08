@@ -13,6 +13,7 @@ import { registerMcpRoute } from './mcp.js';
 import { automationEnabled } from './automation-sessions.js';
 import { createLeasedAutomationSessionManager } from './automation-runtime.js';
 import { navigateAutomationContext, snapshotAutomationContext, clickAutomationControl, fillAutomationControl, screenshotAutomationContext } from './automation-browser.js';
+import { inspectPwaStatus, inspectPwaCaches, setPwaOffline, reloadPwaPage } from './pwa-diagnostics.js';
 import { ScreenshotResourceController } from './resource-controls.js';
 import {
   DefaultScreenshotCapability,
@@ -94,6 +95,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       screenshot: (owner, id, fullPage) => automation.run(owner, id, context => screenshotAutomationContext(context, fullPage)),
       click: (owner, id, selector) => automation.run(owner, id, context => clickAutomationControl(context, selector)),
       fill: (owner, id, selector, value) => automation.run(owner, id, context => fillAutomationControl(context, selector, value)),
+      ...(process.env.BROWSER_PWA_TEST_ENABLED === 'true' ? {
+        setOffline: (owner: string, id: string, offline: boolean) => automation.run(owner, id, context => setPwaOffline(context, offline)),
+        reload: (owner: string, id: string) => automation.run(owner, id, context => reloadPwaPage(context)),
+        pwaStatus: (owner: string, id: string) => automation.run(owner, id, context => inspectPwaStatus(context)),
+        cacheInspect: (owner: string, id: string) => automation.run(owner, id, context => inspectPwaCaches(context)),
+      } : {}),
     } : undefined);
     app.addHook('onClose', async () => { await closeMcp(); });
   }
