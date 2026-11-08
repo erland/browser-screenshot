@@ -28,9 +28,9 @@ describe('PWA diagnostics', () => {
 
   it('rejects non-HTTPS pages without touching network state or storage', async () => {
     const { target, setOffline, evaluate } = fixture('http://example.org/');
-    await expect(setPwaOffline(target, true)).rejects.toThrow('PWA_REQUIRES_HTTPS_PAGE');
-    await expect(inspectPwaStatus(target)).rejects.toThrow('PWA_REQUIRES_HTTPS_PAGE');
-    await expect(inspectPwaCaches(target)).rejects.toThrow('PWA_REQUIRES_HTTPS_PAGE');
+    await expect(setPwaOffline(target, true)).rejects.toThrow('PWA_REQUIRES_SECURE_CONTEXT');
+    await expect(inspectPwaStatus(target)).rejects.toThrow('PWA_REQUIRES_SECURE_CONTEXT');
+    await expect(inspectPwaCaches(target)).rejects.toThrow('PWA_REQUIRES_SECURE_CONTEXT');
     expect(setOffline).not.toHaveBeenCalled();
     expect(evaluate).not.toHaveBeenCalled();
   });
