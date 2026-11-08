@@ -24,6 +24,10 @@ export interface McpAutomationSessions {
   screenshot?(owner: string, id: string, fullPage: boolean): Promise<Buffer>;
   click?(owner: string, id: string, selector: string): Promise<void>;
   fill?(owner: string, id: string, selector: string, value: string): Promise<void>;
+  setOffline?(owner: string, id: string, offline: boolean): Promise<{ offline: boolean }>;
+  reload?(owner: string, id: string): Promise<{ url: string; loaded: boolean }>;
+  pwaStatus?(owner: string, id: string): Promise<unknown>;
+  cacheInspect?(owner: string, id: string): Promise<unknown>;
 }
 
 export function createBrowserScreenshotMcpHandler(
@@ -221,6 +225,62 @@ export function createBrowserScreenshotMcpHandler(
           } catch {
             return { isError: true, content: [{ type: 'text' as const, text: 'FILL_UNAVAILABLE' }] };
           }
+        });
+      }
+      if (automation.setOffline) {
+        server.registerTool('browser_set_offline', {
+          description: 'Emulate network offline/online in the caller-owned PWA test session.',
+          inputSchema: z.object({ sessionId: z.string().uuid(), offline: z.boolean() }),
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        }, async ({ sessionId, offline }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            const value = await automation.setOffline!(owner, sessionId, offline);
+            return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };
+          } catch { return { isError: true, content: [{ type: 'text' as const, text: 'OFFLINE_CHANGE_UNAVAILABLE' }] }; }
+        });
+      }
+      if (automation.reload) {
+        server.registerTool('browser_reload', {
+          description: 'Reload the existing PWA test page without discarding service workers or caches.',
+          inputSchema: z.object({ sessionId: z.string().uuid() }),
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+        }, async ({ sessionId }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            const value = await automation.reload!(owner, sessionId);
+            return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };
+          } catch { return { isError: true, content: [{ type: 'text' as const, text: 'PAGE_RELOAD_UNAVAILABLE' }] }; }
+        });
+      }
+      if (automation.pwaStatus) {
+        server.registerTool('browser_pwa_status', {
+          description: 'Read service worker registration and controller status for the current HTTPS page without exposing storage values.',
+          inputSchema: z.object({ sessionId: z.string().uuid() }),
+          annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        }, async ({ sessionId }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            const value = await automation.pwaStatus!(owner, sessionId);
+            return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };
+          } catch { return { isError: true, content: [{ type: 'text' as const, text: 'PWA_STATUS_UNAVAILABLE' }] }; }
+        });
+      }
+      if (automation.cacheInspect) {
+        server.registerTool('browser_cache_inspect', {
+          description: 'List bounded cache names and sanitized resource paths for the current PWA origin. No cached response bodies or headers are returned.',
+          inputSchema: z.object({ sessionId: z.string().uuid() }),
+          annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        }, async ({ sessionId }) => {
+          const owner = actorKeyProvider();
+          if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'UNAUTHORIZED' }] };
+          try {
+            const value = await automation.cacheInspect!(owner, sessionId);
+            return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };
+          } catch { return { isError: true, content: [{ type: 'text' as const, text: 'PWA_CACHE_UNAVAILABLE' }] }; }
         });
       }
       server.registerTool('browser_session_close', {
