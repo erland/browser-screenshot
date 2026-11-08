@@ -42,6 +42,36 @@ describe('automation MCP contract via real MCP transport', () => {
     } finally { await x.close(); }
   });
 
+  it('exposes a safe, complete PWA workflow in tool descriptions even without host skill support', async () => {
+    process.env.BROWSER_AUTOMATION_ENABLED = 'true';
+    const x = await connect(() => 'owner-a', {
+      create: vi.fn(), close: vi.fn(), navigate: vi.fn(), snapshot: vi.fn(),
+      screenshot: vi.fn(), click: vi.fn(), fill: vi.fn(),
+      setOffline: vi.fn(), reload: vi.fn(), pwaStatus: vi.fn(), cacheInspect: vi.fn(),
+    });
+    try {
+      const tools = (await x.client.listTools()).tools;
+      const description = (name: string) => tools.find(t => t.name === name)?.description ?? '';
+      expect(description('browser_session_create')).toContain('ALWAYS call browser_session_close');
+      expect(description('browser_navigate')).toContain('browser_pwa_status');
+      expect(description('browser_snapshot')).toContain('before and after');
+      expect(description('browser_click')).toContain('explicit user authorization');
+      expect(description('browser_set_offline')).toContain('offline:false');
+      expect(description('browser_set_offline')).toContain('browser_session_close');
+      expect(description('browser_reload')).toContain('loaded:false');
+      expect(description('browser_pwa_status')).toContain('does not prove offline support');
+      expect(description('browser_cache_inspect')).toContain('Cache presence alone');
+      expect(description('browser_session_close')).toContain('Always close');
+      const expected = [
+        'screenshot_create', 'browser_session_create', 'browser_session_close',
+        'browser_navigate', 'browser_snapshot', 'browser_session_screenshot',
+        'browser_click', 'browser_fill', 'browser_set_offline', 'browser_reload',
+        'browser_pwa_status', 'browser_cache_inspect',
+      ];
+      expect(tools.map(t => t.name).sort()).toEqual(expected.sort());
+    } finally { await x.close(); }
+  });
+
   it('creates and closes sessions using caller identity, rejecting cross-user close', async () => {
     process.env.BROWSER_AUTOMATION_ENABLED = 'true';
     let currentOwner: string | undefined = 'owner-a';
