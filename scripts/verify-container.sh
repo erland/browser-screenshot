@@ -33,6 +33,13 @@ docker run --rm --init --shm-size=1g \
   -e BROWSER_PWA_TEST_ENABLED=true \
   "$IMAGE" node apps/server/dist/container-smoke.js
 
+# An actual service worker attempts a private-network fetch. The private
+# fixture's inbound counter must not increase; failure blocks the release.
+docker run --rm --init --shm-size=1g \
+  --security-opt "seccomp=$SECCOMP_PROFILE" \
+  -e BROWSER_PWA_TEST_ENABLED=true \
+  "$IMAGE" node apps/server/dist/pwa-worker-egress-smoke.js
+
 docker compose -p "$PROJECT" up -d --build
 for _ in $(seq 1 30); do
   if curl --fail --silent http://127.0.0.1:8080/ready >/dev/null; then
