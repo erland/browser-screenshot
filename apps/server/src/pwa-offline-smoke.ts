@@ -25,7 +25,7 @@ try {
     'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
     '-keyout', key, '-out', cert, '-days', '1',
     '-subj', '/CN=localhost',
-    '-addext', 'subjectAltName=DNS:localhost',
+    '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
   ], { stdio: 'ignore', timeout: 10_000 });
   const [privateKey, certificate] = await Promise.all([readFile(key), readFile(cert)]);
   let received = 0;
@@ -69,7 +69,7 @@ try {
   await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Fixture bind failed');
-  const url = 'https://localhost:' + address.port + '/';
+  const url = 'https://127.0.0.1:' + address.port + '/';
   // This context intentionally uses local test networking (not the hardened
   // proxy) to exercise real service-worker installation with a fixture.
   browser = await chromium.launch({ headless: true, chromiumSandbox: true });
