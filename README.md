@@ -209,3 +209,39 @@ The code-level CI/container smoke tests are distinct from the manual deployed
 end-to-end acceptance deferred until after release.
 
 Implementation and open risk evidence: `docs/changes/c-001-playwright-hybrid-spike.md`.
+
+
+### BS-PWA-001: opt-in PWA offline diagnostics
+
+PWA diagnostics are **disabled by default**, independent of the existing
+`BROWSER_AUTOMATION_ENABLED` switch. In an isolated test deployment set both:
+
+```env
+BROWSER_AUTOMATION_ENABLED=true
+BROWSER_PWA_TEST_ENABLED=true
+```
+
+This changes **interactive automation contexts only** to permit service workers;
+ordinary one-off screenshots still block them. Service workers may bypass
+Playwright request routing, so the hardened Chromium proxy and deployment
+network-level egress restrictions remain essential. Do not enable this against
+untrusted sites until the real container/network security acceptance passes.
+
+New OAuth-authorized MCP operations on caller-owned sessions:
+- `browser_set_offline({sessionId, offline})`: emulate offline/online network state.
+- `browser_reload({sessionId})`: reload without losing context; returns `loaded:false`
+  if navigation fails, including normal offline failures.
+- `browser_pwa_status({sessionId})`: bounded registration lifecycle and control status.
+- `browser_cache_inspect({sessionId})`: bounded cache names, counts and sanitized
+  same-origin resource paths; never response contents, headers or query strings.
+
+Typical test: create session, navigate to HTTPS test PWA, wait for its
+service worker installation, inspect registration/cache, toggle offline,
+reload and inspect UI, toggle online, then close the session. Service-worker
+activation timing is application-dependent; a reload or additional navigation
+may be needed before the page becomes controlled.
+
+**Remaining release gate:** source tests, browser/production-container CI,
+proxy SSRF regressions specifically with service workers enabled, and deployed
+OAuth end-to-end acceptance. A green source build alone is not permission to
+enable this opt-in feature in production.
