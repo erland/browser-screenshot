@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SecuredAutomationContext } from './automation-browser.js';
+import { validatePublicUrl } from './network-policy.js';
+
+vi.mock('./network-policy.js', () => ({ validatePublicUrl: vi.fn(async () => ({})) }));
 import { inspectPwaCaches, inspectPwaStatus, reloadPwaPage, setPwaOffline } from './pwa-diagnostics.js';
 
 function fixture(url = 'https://example.org/app?token=secret') {
@@ -46,8 +49,8 @@ describe('PWA diagnostics', () => {
     expect(currentUrl).toBe('chrome-error://chromewebdata/');
     await expect(setPwaOffline(target, false)).resolves.toEqual({ offline: false });
     // The last trusted destination must be validated before navigating.
-    // This test uses a public example.org URL and the default resolver.
     await expect(reloadPwaPage(target)).resolves.toEqual({ url: 'https://example.org/app', loaded: true });
+    expect(validatePublicUrl).toHaveBeenCalledWith('https://example.org/app?token=secret');
     expect(goto).toHaveBeenCalledWith(
       'https://example.org/app?token=secret',
       { waitUntil: 'domcontentloaded', timeout: 10_000 },
