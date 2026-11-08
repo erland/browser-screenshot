@@ -87,7 +87,7 @@ export function registerBrowserSkills(server: McpServer): void {
 
   server.server.setRequestHandler(
     'skills/list',
-    { params: z.object({ cursor: z.string().optional() }).passthrough() },
+    { params: z.object({ cursor: z.string().optional().refine(value => value === undefined, 'Unknown cursor') }).passthrough() },
     async ({ cursor }) => {
       if (cursor) throw new Error('Invalid skills/list cursor');
       return {
@@ -100,7 +100,7 @@ export function registerBrowserSkills(server: McpServer): void {
   );
   server.server.setRequestHandler(
     'skills/get',
-    { params: z.object({ uri: z.string().max(256) }).passthrough() },
+    { params: z.object({ uri: z.string().max(256).refine(value => byUri.has(value), 'Unknown skill URI') }).passthrough() },
     async ({ uri }) => {
       const skill = byUri.get(uri);
       if (!skill) throw new Error('Unknown skill: ' + uri);
