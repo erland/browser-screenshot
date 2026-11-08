@@ -1,4 +1,5 @@
 import type { IncomingMessage } from 'node:http';
+import { registerBrowserSkills } from './mcp-skills.js';
 import { z } from 'zod';
 import { automationEnabled } from './automation-sessions.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -48,6 +49,7 @@ export function createBrowserScreenshotMcpHandler(
         sizes: ['64x64'],
       }],
     });
+    registerBrowserSkills(server);
     server.registerResource(
       'screenshot-viewer',
       SCREENSHOT_WIDGET_URI,

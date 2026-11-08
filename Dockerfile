@@ -20,6 +20,7 @@ COPY apps/web/package.json apps/web/package.json
 RUN npm ci --omit=dev --no-audit --no-fund
 COPY --from=build /app/apps/server/dist apps/server/dist
 COPY --from=build /app/apps/server/migrations apps/server/migrations
+COPY --from=build /app/plugin/skills plugin/skills
 COPY --from=build /app/apps/web/dist apps/web/dist
 RUN chown -R pwuser:pwuser /app
 USER pwuser

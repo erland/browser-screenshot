@@ -107,6 +107,9 @@ jobs:
           test -f build/plugin-marketplace/browser-screenshot/plugin.json
           test -f build/plugin-marketplace/browser-screenshot/mcp.json
           test -f build/plugin-marketplace/browser-screenshot/skills/browser-screenshot/SKILL.md
+          test -f build/plugin-marketplace/browser-screenshot/skills/browser-interactive-test/SKILL.md
+          test -f build/plugin-marketplace/browser-screenshot/skills/browser-pwa-offline-test/SKILL.md
+          test -f build/plugin-marketplace/browser-screenshot/skills/browser-release-verification/SKILL.md
           test -f build/plugin-marketplace/browser-screenshot/assets/logo.png
           test -f build/plugin-marketplace/browser-screenshot/assets/composer-icon.png
           test ! -e build/plugin-marketplace/browser-screenshot/.app.json

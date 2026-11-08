@@ -1,28 +1,27 @@
 ---
 name: browser-screenshot
-description: Use Browser Screenshot when the user wants a PNG capture of a public HTTP(S) web page at a desktop, tablet, mobile, or custom viewport.
+description: Capture a PNG screenshot of a public HTTP(S) web page at a desktop, tablet, mobile, or custom viewport with exact requested settings and reported metadata.
 ---
 
-# Browser Screenshot workflow
+# Browser Screenshot capture
 
-Browser Screenshot opens a public HTTP(S) URL in an isolated Chromium browser and returns a PNG image plus capture metadata.
-
-Use `screenshot_create` only when a screenshot or visual capture is actually useful to the user's request.
+Use `screenshot_create` when the user explicitly needs a screenshot of a public HTTP(S) website. This single-shot capture does not require an interactive browser session.
 
 ## Capture
 
-Pass the exact public URL supplied by the user. Choose the requested viewport preset or custom dimensions.
+1. Pass the exact public URL requested by the user.
+2. Use the requested desktop, tablet, mobile, or custom viewport; default to desktop only when unspecified.
+3. Set full-page capture only when requested or necessary to inspect content below the fold.
+4. Return the resulting PNG and actual capture metadata. Do not invent dimensions, durations, responsive behavior, or unseen UI.
 
-If the user does not specify a viewport, default to desktop.
+Do not create multiple viewport screenshots unless requested.
 
-Set full-page capture only when the user asks for the entire page or when capturing beyond the visible viewport is clearly necessary.
+## Other workflows
 
-Do not automatically create desktop, tablet, and mobile variants. Capture exactly the requested view unless the user asks for multiple variants.
+Browser Screenshot also offers separately gated interactive automation. For authorized multi-step navigation and control inspection, use the **browser-interactive-test** skill. For PWA cache, service-worker, and offline checks, use **browser-pwa-offline-test**. For a structured deployment check, use **browser-release-verification**.
 
-## Safety and scope
+Interactive and PWA operations require administrator-enabled feature flags and authenticated, owner-bound sessions. Screenshot capture does **not** imply that these features are available.
 
-The service is for screenshot capture only. It does not log in, click controls, submit forms, modify websites, or automate workflows beyond navigation required to render the requested public page.
+## Safety
 
-Do not use it for localhost, private-network targets, or other resources that are not public HTTP(S) pages.
-
-Return the screenshot and the metadata reported by the tool. When the host renders the Browser Screenshot viewer, let the user use its **View large** action for fullscreen inspection and **Download PNG** to save the capture locally. Do not invent page dimensions, timing, or capture settings.
+Never capture localhost, private IP addresses, or internal resources. Do not invent screenshots, run arbitrary page JavaScript, or treat a screenshot as proof that the app functions correctly. All consequential page modifications require explicit authorization and the service's HTTPS test-origin allowlist.

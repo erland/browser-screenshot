@@ -237,7 +237,7 @@ try {
         ? raw.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).find(line => line.startsWith('{'))
         : raw;
       if (!data) throw new Error('MCP returned no JSON response');
-      const json = JSON.parse(data) as { error?: unknown; result?: { tools?: Array<{name: string}>; content?: Array<{type: string; text?: string}>; isError?: boolean } };
+      const json = JSON.parse(data) as { error?: unknown; result?: { tools?: Array<{name: string}>; skills?: Array<{uri: string}>; contents?: Array<{uri: string; text?: string}>; content?: Array<{type: string; text?: string}>; isError?: boolean } };
       if (json.error || !json.result) throw new Error('MCP protocol error: ' + JSON.stringify(json.error));
       return json.result;
     }
@@ -249,6 +249,23 @@ try {
       });
       const tools = await mcpRequest('tools/list', {});
       const listed = (tools.tools ?? []).map(tool => tool.name);
+      // Packaged-runtime check: static skills must be present in the image and
+      // genuinely readable over MCP, not only in development source files.
+      const skills = await mcpRequest('skills/list', {});
+      const skillUris = (skills.skills ?? []).map(skill => skill.uri).sort();
+      const expectedSkills = [
+        'browser-interactive-test', 'browser-pwa-offline-test',
+        'browser-release-verification', 'browser-screenshot',
+      ].map(name => 'skill://' + name + '/SKILL.md').sort();
+      if (JSON.stringify(skillUris) !== JSON.stringify(expectedSkills)) {
+        throw new Error('Packaged MCP skills catalog missing or incomplete: ' + JSON.stringify(skillUris));
+      }
+      for (const uri of skillUris) {
+        const read = await mcpRequest('resources/read', { uri });
+        if (!read.contents?.some(item => item.uri === uri && item.text?.startsWith('---'))) {
+          throw new Error('Packaged MCP skill is unreadable: ' + uri);
+        }
+      }
       for (const name of ['browser_session_create', 'browser_snapshot', 'browser_session_screenshot', 'browser_fill', 'browser_click', 'browser_session_close']) {
         if (!listed.includes(name)) throw new Error('Missing MCP tool: ' + name);
       }
