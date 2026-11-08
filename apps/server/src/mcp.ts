@@ -13,7 +13,7 @@ import type { ScreenshotCapability } from './screenshot-capability.js';
 import { SCREENSHOT_WIDGET_HTML, SCREENSHOT_WIDGET_URI } from './screenshot-widget.js';
 
 const BROWSER_SCREENSHOT_DESCRIPTION =
-  'Capture screenshots of public HTTP(S) pages, or use optional authenticated browser sessions for interaction tests and PWA offline diagnostics. Typical workflow: create session, navigate, inspect snapshot/status/cache, test offline/reload/online recovery, always close. Tools are available independently of whether the MCP host supports Skills Extension.';
+  'Capture PNG screenshots of public HTTP(S) pages, or use optional authenticated browser sessions for interaction tests and PWA offline diagnostics. Typical workflow: create session, navigate, inspect snapshot/status/cache, test offline/reload/online recovery, always close. Tools are available independently of whether the MCP host supports Skills Extension.';
 const BROWSER_SCREENSHOT_WEBSITE = 'https://browser-screenshot.apphome.one/about';
 const BROWSER_SCREENSHOT_ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABJklEQVR4nO2bwQ3CMBAECeLLD0ERlEIN0AD10AA1hFIogirghRShQMzZZix25x3h0eicOJHo1vv+PhNmTgvQOAAtQOMAtACNA9ACNA5AC9A4AC1A4wC0AM0i9cLraVfTowrb42XyGvkJcABagMYBaAEaB6AFaJLPAatlTQ0O+QmQD5C8BcbYHMaPmrdzvWNz6TXDE/BOhCLq4y1Q4kdqjvzUWrmTKD8BDkAL0ITvAb/c95/I9ZCfAAegBWgcgBagCT8Fhicw8omQ6yE/AQ5AC9AUeRt8fSMjPohEkZ+AcIBW3gWeRH2ytgARofSayRPQ2jfAKVJ95e8BXeT/Aq3t/yHfTmoowD8hvwUcgBagcQBagMYBaAEaB6AFaByAFqBxAFqARj7AA03iMc36yblqAAAAAElFTkSuQmCC';
 
@@ -231,7 +231,7 @@ export function createBrowserScreenshotMcpHandler(
       }
       if (automation.setOffline) {
         server.registerTool('browser_set_offline', {
-          description: 'PWA workflow: start online on public HTTPS, inspect browser_pwa_status and browser_cache_inspect; set offline:true, then browser_reload and browser_snapshot. ALWAYS restore offline:false (even when offline reload fails), reload online, and close the session. Network emulation alone is not proof of offline PWA functionality.',
+          description: 'PWA workflow: start online on public HTTPS, inspect browser_pwa_status and browser_cache_inspect; set offline:true, then browser_reload and browser_snapshot. ALWAYS restore offline:false (even when offline reload fails), reload online, and call browser_session_close. Network emulation alone is not proof of offline PWA functionality.',
           inputSchema: z.object({ sessionId: z.string().uuid(), offline: z.boolean() }),
           annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         }, async ({ sessionId, offline }) => {
