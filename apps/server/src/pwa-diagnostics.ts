@@ -1,4 +1,5 @@
 import type { SecuredAutomationContext } from './automation-browser.js';
+import { validatePublicUrl } from './network-policy.js';
 
 /**
  * PWA inspection is intentionally confined to the page's own origin.
@@ -17,20 +18,49 @@ function requireHttpsPage(target: SecuredAutomationContext): void {
   }
 }
 
-export async function setPwaOffline(target: SecuredAutomationContext, offline: boolean): Promise<{ offline: boolean }> {
+// A failed offline navigation can replace page.url() with Chromium's internal
+// chrome-error://chromewebdata/ URL. Remember ONLY an earlier secure page for
+// this exact Page object; never accept recovery targets from page content.
+const recoveryTargets = new WeakMap<SecuredAutomationContext['page'], string>();
+
+function secureCurrentPage(target: SecuredAutomationContext): string {
   requireHttpsPage(target);
+  const url = target.page.url();
+  recoveryTargets.set(target.page, url);
+  return url;
+}
+
+export async function setPwaOffline(target: SecuredAutomationContext, offline: boolean): Promise<{ offline: boolean }> {
+  if (offline) {
+    // Entering offline mode requires a trusted page. Restoring connectivity
+    // must be allowed even after Chromium has replaced it with an error page.
+    secureCurrentPage(target);
+  }
   await target.context.setOffline(offline);
   return { offline };
 }
 
 export async function reloadPwaPage(target: SecuredAutomationContext): Promise<{ url: string; loaded: boolean }> {
-  requireHttpsPage(target);
+  const current = target.page.url();
+  const isBrowserErrorPage = current.startsWith('chrome-error://');
+  if (!isBrowserErrorPage) secureCurrentPage(target);
+  const recoveryUrl = isBrowserErrorPage ? recoveryTargets.get(target.page) : undefined;
+  if (isBrowserErrorPage && !recoveryUrl) throw new Error('PWA_RECOVERY_TARGET_UNAVAILABLE');
   try {
-    await target.page.reload({ waitUntil: 'domcontentloaded', timeout: 10_000 });
+    if (recoveryUrl) {
+      // Revalidate the remembered target before any new navigation, preserving
+      // all existing public-destination/SSRF restrictions.
+      await validatePublicUrl(recoveryUrl);
+      await target.page.goto(recoveryUrl, { waitUntil: 'domcontentloaded', timeout: 10_000 });
+    } else {
+      await target.page.reload({ waitUntil: 'domcontentloaded', timeout: 10_000 });
+    }
     return { url: target.page.url().split('?')[0].split('#')[0], loaded: true };
   } catch {
     // A failed offline navigation is a test result, not a transport/tool failure.
-    return { url: target.page.url().split('?')[0].split('#')[0], loaded: false };
+    // Never disclose chrome-error URLs; report the last authorized page instead.
+    const url = recoveryTargets.get(target.page) ?? target.page.url();
+    return { url: url.split('?')[0].split('#')[0], loaded: false };
   }
 }
 
