@@ -42,6 +42,15 @@ jobs:
       - name: Release gate regression tests
         run: npm run test:release-gate
 
+      - name: Verify remote skills acceptance script is safe to invoke
+        shell: bash
+        run: |
+          node --check scripts/verify-remote-skills.mjs
+          if env -u BROWSER_SCREENSHOT_MCP_TOKEN node scripts/verify-remote-skills.mjs > /dev/null 2>&1; then
+            echo "Remote skills verification must reject missing OAuth credentials" >&2
+            exit 1
+          fi
+
   postgres-integration:
     name: Verify PostgreSQL identities
     runs-on: ubuntu-latest
