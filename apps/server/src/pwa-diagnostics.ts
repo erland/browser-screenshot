@@ -7,7 +7,14 @@ import type { SecuredAutomationContext } from './automation-browser.js';
  */
 function requireHttpsPage(target: SecuredAutomationContext): void {
   const url = new URL(target.page.url());
-  if (url.protocol !== 'https:') throw new Error('PWA_REQUIRES_HTTPS_PAGE');
+  // Browsers regard loopback HTTP as a potentially trustworthy origin for
+  // local PWA tests. The production navigation/SSRF boundary still blocks
+  // loopback destinations; this is not a permission to browse private hosts.
+  const trustedLoopback = url.protocol === 'http:' &&
+    (url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]');
+  if (url.protocol !== 'https:' && !trustedLoopback) {
+    throw new Error('PWA_REQUIRES_SECURE_CONTEXT');
+  }
 }
 
 export async function setPwaOffline(target: SecuredAutomationContext, offline: boolean): Promise<{ offline: boolean }> {
