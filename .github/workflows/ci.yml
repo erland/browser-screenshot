@@ -39,6 +39,20 @@ jobs:
           SKIP_SANDBOX_RUNTIME_TESTS: "1"
         run: npm run verify
 
+      - name: Validate release workflow YAML and plugin publication structure
+        shell: bash
+        run: |
+          ruby -e '
+            require "yaml"
+            file = YAML.load_file(".github/workflows/release.yml")
+            jobs = file.fetch("jobs")
+            steps = jobs.fetch("publish-plugin").fetch("steps")
+            upload = steps.count { |s| s["name"] == "Attach plugin ZIP to GitHub Release" }
+            inspection = steps.count { |s| s["name"] == "Inspect Marketplace plugin archive" }
+            abort "Expected one archive inspection and one upload step" unless upload == 1 && inspection == 1
+            puts "Release workflow YAML: PASS"
+          '
+
       - name: Release gate regression tests
         run: npm run test:release-gate
 
