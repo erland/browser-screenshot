@@ -21,6 +21,31 @@ describe('secure automation browser adapter', () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it('permits service workers only under the independent PWA test feature flag', async () => {
+    const previous = process.env.BROWSER_PWA_TEST_ENABLED;
+    const newContext = vi.fn(async () => ({
+      close: async () => {},
+      route: async () => {},
+      newPage: async () => ({
+        setDefaultTimeout: () => {},
+        setDefaultNavigationTimeout: () => {},
+      }),
+    }));
+    try {
+      process.env.BROWSER_PWA_TEST_ENABLED = 'true';
+      const allowed = await createSecuredAutomationContext({ browser: { newContext } } as never);
+      expect(newContext).toHaveBeenLastCalledWith(expect.objectContaining({ serviceWorkers: 'allow' }));
+      await allowed.close();
+      process.env.BROWSER_PWA_TEST_ENABLED = 'false';
+      const blocked = await createSecuredAutomationContext({ browser: { newContext } } as never);
+      expect(newContext).toHaveBeenLastCalledWith(expect.objectContaining({ serviceWorkers: 'block' }));
+      await blocked.close();
+    } finally {
+      if (previous === undefined) delete process.env.BROWSER_PWA_TEST_ENABLED;
+      else process.env.BROWSER_PWA_TEST_ENABLED = previous;
+    }
+  });
+
   it('fails closed for invalid viewport sizes', async () => {
     const newContext = vi.fn();
     await expect(createSecuredAutomationContext({ browser: { newContext } } as never, { width: 99999, height: 720 }))
