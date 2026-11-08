@@ -61,3 +61,68 @@ interpret `resources/read` as automatic skill activation.
    and confirm available skill discovery in the actual ChatGPT client.
 4. Separately complete the deployed OAuth/egress PWA acceptance before enabling
    experimental PWA automation.
+
+
+## BS-SKILL-003: deployed-server and ChatGPT installation verification
+
+**Two separate acceptances are required.** A successful server-side Skills
+extension does not demonstrate that the ChatGPT host imported the skill bundle.
+
+### A. Authenticated deployed MCP server
+
+Use a *real OAuth access token* issued to a trusted operator for this service.
+Do not paste tokens into chats, logs, GitHub issues, CI output, or shell history.
+From the matching Git tag or checked-out release source, run:
+
+```sh
+# Provide BROWSER_SCREENSHOT_MCP_TOKEN securely in your shell environment.
+# Optional: override BROWSER_SCREENSHOT_MCP_URL for staging.
+node scripts/verify-remote-skills.mjs
+```
+
+The script validates `initialize`, `server/discover` (skills and resources
+capabilities), `skills/list`, all four `skills/get` calls, and all four
+`resources/read` calls. It compares remote bytes to both manifest SHA-256
+and the **matching local release source**. A 401 or unavailable OAuth token
+is **not tested**, not a pass. It is deliberately not wired into unauthenticated
+CI, because that would require injecting an operator credential into builds.
+
+The script proves the deployed MCP protocol only. It does not imply ChatGPT
+has granted approval or loaded any skills.
+
+### B. ChatGPT plugin bundle
+
+1. Confirm the **GitHub Release asset**
+   `browser-screenshot-plugin-<version>.zip` was produced from the correct tag.
+   The release workflow now fails if any of the four `SKILL.md` files are absent.
+2. Confirm this *updated plugin artifact*, not just the server container,
+   was installed/published/synchronized using the actual supported ChatGPT
+   plugin distribution workflow.
+3. Start a **new ChatGPT conversation** after installing/updating the plugin,
+   because installed bundled skills are resolved at session startup.
+4. Check whether the four skill names are in the loaded skill list:
+   `browser-screenshot`, `browser-interactive-test`,
+   `browser-pwa-offline-test`, `browser-release-verification`.
+5. Invoke an appropriate explicit workflow (for example, screenshot then
+   release verification) and distinguish observed instruction-guided use
+   from mere availability of MCP tools.
+
+**Important limitation:** the MCP tool bridge exposed in ChatGPT may expose
+only `tools/call` and no raw `skills/list` method. Failure to see remote
+skills in a particular chat therefore does **not** by itself prove an MCP
+protocol bug. Conversely, working tools do **not** prove that ChatGPT installed
+the updated plugin ZIP.
+
+If all four skills are present and usable in the new ChatGPT session, mark
+BS-SKILL-003 complete. Otherwise collect: installed plugin package version,
+release ZIP version, the local-versus-remote acceptance result, skill names
+visible in a fresh session, and host support/approval status. Do not add an
+unauthenticated MCP endpoint or a privileged tools-based skill loader as a
+shortcut.
+
+### Release artifact parity
+
+A Docker image release and a Marketplace plugin ZIP are separate artifacts.
+Publishing a newer Docker container does not update an already installed
+plugin ZIP. For BS-SKILL-003, deploy/publish both from the same tag. Keep
+interactive and PWA test features under their existing independent flags.
