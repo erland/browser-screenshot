@@ -139,37 +139,29 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "archive=build/browser-screenshot-plugin-${VERSION}.zip" >> "$GITHUB_OUTPUT"
       - name: Inspect Marketplace plugin archive
+        shell: bash
         run: |
-          unzip -l "${{ steps.plugin.outputs.archive }}"
-          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/plugin.json | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const p=JSON.parse(s);if(p.name!=='browser-screenshot'||p.version!=='${{ steps.plugin.outputs.version }}'||p.apps!=null||p.extensions?.['com.openai']?.apps!=null)process.exit(1)})"
-          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/mcp.json | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const m=JSON.parse(s);if(m.mcpServers?.['browser-screenshot']?.url!=='${BROWSER_SCREENSHOT_MCP_URL}')process.exit(1)})"
-          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/skills/browser-screenshot/SKILL.md >/dev/null
-          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/skills/browser-interactive-test/SKILL.md >/dev/null
-          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/skills/browser-pwa-offline-test/SKILL.md >/dev/null
-          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/skills/browser-release-verification/SKILL.md >/dev/null
-          # Prevent a successful server release from distributing stale skills.
-          count="$(unzip -Z1 "${{ steps.plugin.outputs.archive }}" | grep -Ec '^browser-screenshot/skills/[^/]+/SKILL\.md
-          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/assets/logo.png >/dev/null
-          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/assets/composer-icon.png >/dev/null
-          if unzip -l "${{ steps.plugin.outputs.archive }}" | grep -Eq '\.app\.json|\.codex-plugin/'; then
-            echo "Marketplace upload must not contain app bindings or compatibility update manifests." >&2
-            exit 1
-          fi
-      - name: Attach plugin ZIP to GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "${{ steps.plugin.outputs.archive }}" --clobber
-)"
+          set -euo pipefail
+          archive="${{ steps.plugin.outputs.archive }}"
+          unzip -l "$archive"
+          unzip -p "$archive" browser-screenshot/plugin.json | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const p=JSON.parse(s);if(p.name!=='browser-screenshot'||p.version!=='${{ steps.plugin.outputs.version }}'||p.apps!=null||p.extensions?.['com.openai']?.apps!=null)process.exit(1)})"
+          unzip -p "$archive" browser-screenshot/mcp.json | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const m=JSON.parse(s);if(m.mcpServers?.['browser-screenshot']?.url!=='${BROWSER_SCREENSHOT_MCP_URL}')process.exit(1)})"
+          for name in browser-screenshot browser-interactive-test browser-pwa-offline-test browser-release-verification; do
+            unzip -p "$archive" "browser-screenshot/skills/${name}/SKILL.md" >/dev/null
+          done
+          # Prevent a successful release from distributing missing or stale skills.
+          count="$(unzip -Z1 "$archive" | grep -Ec '^browser-screenshot/skills/[^/]+/SKILL[.]md$')"
           if [[ "$count" != "4" ]]; then
-            echo "Expected four bundled Browser Screenshot skills; found $count" >&2
+            echo "Expected exactly four bundled Browser Screenshot skills; found $count" >&2
             exit 1
           fi
-          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/assets/logo.png >/dev/null
-          unzip -p "${{ steps.plugin.outputs.archive }}" browser-screenshot/assets/composer-icon.png >/dev/null
-          if unzip -l "${{ steps.plugin.outputs.archive }}" | grep -Eq '\.app\.json|\.codex-plugin/'; then
+          unzip -p "$archive" browser-screenshot/assets/logo.png >/dev/null
+          unzip -p "$archive" browser-screenshot/assets/composer-icon.png >/dev/null
+          if unzip -l "$archive" | grep -Eq '[.]app[.]json|[.]codex-plugin/'; then
             echo "Marketplace upload must not contain app bindings or compatibility update manifests." >&2
             exit 1
           fi
+
       - name: Attach plugin ZIP to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
