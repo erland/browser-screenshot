@@ -126,3 +126,43 @@ A Docker image release and a Marketplace plugin ZIP are separate artifacts.
 Publishing a newer Docker container does not update an already installed
 plugin ZIP. For BS-SKILL-003, deploy/publish both from the same tag. Keep
 interactive and PWA test features under their existing independent flags.
+
+## BS-SKILL-004: remote MCP connection without a local plugin installation
+
+The primary cross-device deployment is a **remote HTTPS MCP server connected
+directly to ChatGPT**. The user refreshes its MCP tools in ChatGPT; there is
+**no locally installed `mcp.json` plugin ZIP** in this setup. Do not prescribe
+a desktop-only plugin package as the required solution for mobile use.
+
+Three independently verifiable layers:
+
+1. **Server-side publication:** a compatible, authenticated MCP client calls
+   `server/discover`, `skills/list`, `skills/get`, `resources/read`. Run
+   `scripts/verify-remote-skills.mjs` with a valid existing OAuth token and
+   the matching release source. Until run against production, this layer is
+   **not verified in production**, even when container tests pass.
+2. **Host capability and activation:** ChatGPT must itself implement and
+   negotiate `io.modelcontextprotocol/skills`, validate manifests, obtain any
+   host-required approval and load the instructions. A refreshed MCP
+   `tools/list` result or the host's internal skill inventory does not prove
+   whether the server supports extension methods. If the host does not expose
+   these extension calls, its activation remains **not verified**; do not
+   claim that `resources/read` automatically activates a skill.
+3. **Tool-guidance compatibility:** all 12 existing tool descriptions now
+   include short task-oriented guidance where relevant: authorized public
+   origins, unique selectors, an online/offline/PWA inspection sequence,
+   **always restore online**, and close the session even on failure. This
+   works through ordinary `tools/list`, including clients that have not
+   adopted Skills Extension; it does **not** masquerade as installed skills.
+
+**Cross-device acceptance:** on a freshly refreshed ChatGPT remote MCP
+connection, inspect tool descriptions and perform an authorized public-site
+flow. Verify a real PWA only with a public HTTPS app having a service worker
+and testable cached resources; `example.com` verifies offline failure and
+recovery only. Report remote skill discovery and ChatGPT host skill activation
+separately. Do not create anonymous skill endpoints or expose OAuth bearer
+tokens through MCP tools as a workaround.
+
+The Marketplace ZIP remains supported for other distribution channels, but
+its successful build/installation is **not** a prerequisite for remote MCP
+tool use on iOS/desktop.
