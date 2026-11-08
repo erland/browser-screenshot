@@ -5,7 +5,7 @@ import { inspectPwaCaches, inspectPwaStatus, reloadPwaPage, setPwaOffline } from
 function fixture(url = 'https://example.org/app?token=secret') {
   const setOffline = vi.fn(async () => {});
   const reload = vi.fn(async () => {});
-  const evaluate = vi.fn(async () => ({ supported: true, controlled: false, registrations: [] }));
+  const evaluate = vi.fn(async (...args: unknown[]) => { void args; return { supported: true, controlled: false, registrations: [] }; });
   const context = { setOffline };
   const page = { url: () => url, reload, evaluate };
   return { target: { context, page } as unknown as SecuredAutomationContext, setOffline, reload, evaluate };
